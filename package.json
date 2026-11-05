@@ -1,0 +1,18 @@
+{
+  "name": "golden-financial-website",
+  "version": "1.0.0",
+  "description": "Golden Financial Services — public website, customer portal and secure backend (MWK). Linked to the golden-loan-services admin system.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "seed": "node server/seed.js --force",
+    "backup": "node server/backup.js",
+    "test": "node tests/run.js"
+  },
+  "engines": { "node": ">=22.5.0" },
+  "dependencies": {},
+  "license": "UNLICENSED",
+  "private": true
+}

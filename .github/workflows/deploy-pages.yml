@@ -1,0 +1,42 @@
+name: Deploy website to GitHub Pages
+
+# The public/ folder is a complete static site (no build step). On GitHub Pages
+# it runs in device-local demo mode and bridges to the golden-loan-services
+# admin pages on the same github.io origin. For the full secure backend, deploy
+# the Node server (see README) and the site auto-connects to it.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare static site
+        run: |
+          # The shared financial core lives in public/js/core.js (loaded by both
+          # the browser and the Node backend), so public/ is fully self-contained.
+          test -f public/index.html
+          test -f public/js/core.js
+          touch public/.nojekyll
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - id: deployment
+        uses: actions/deploy-pages@v4

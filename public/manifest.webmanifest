@@ -1,0 +1,18 @@
+{
+  "name": "Golden Financial Services",
+  "short_name": "Golden FS",
+  "description": "Loans in Malawi — apply, track, repay and manage your loans with Golden Financial Services.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#064E3B",
+  "theme_color": "#064E3B",
+  "icons": [
+    { "src": "assets/apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" },
+    { "src": "assets/logo.png", "sizes": "600x400", "type": "image/png", "purpose": "any" }
+  ],
+  "categories": ["finance", "business"],
+  "lang": "en",
+  "dir": "ltr"
+}

@@ -1,0 +1,48 @@
+{
+  "$comment": "Example back-office connection contract between golden-loan-services (admin) and golden-financial-website- (customer platform). Copy to your deployment config; never commit real secrets.",
+  "platform": "Golden Financial Services",
+  "currency": "MWK",
+  "customerBackend": {
+    "baseUrl": "https://your-backend.example",
+    "healthEndpoint": "/api/health",
+    "configEndpoint": "/api/config",
+    "integrationKeyHeader": "X-GFS-Integration-Key",
+    "integrationKey": "SET_VIA_ENV_GFS_INTEGRATION_KEY",
+    "endpoints": {
+      "exportFeed": "GET /api/integration/export?since=ISO8601",
+      "pushSettings": "POST /api/integration/settings",
+      "pushDecision": "POST /api/integration/decision"
+    }
+  },
+  "adminSystem": {
+    "repo": "https://github.com/wwwmaryemmanuel01/golden-loan-services",
+    "pagesUrl": "https://wwwmaryemmanuel01.github.io/golden-loan-services/",
+    "modules": ["applications.html", "clients.html", "payments.html", "repayments.html", "statements.html", "settings.html", "website.html"]
+  },
+  "githubPagesBridge": {
+    "sharedOrigin": "https://wwwmaryemmanuel01.github.io",
+    "localStorageKeys": ["gls_agreement_v1", "gls_apply_draft_v1", "gls_applications_v1"],
+    "note": "Both project sites share the github.io origin, so localStorage is shared. The customer site writes submitted applications into gls_applications_v1 in the admin format."
+  },
+  "sharedRules": {
+    "affordabilityCap": 0.40,
+    "latePenaltyPctPerMonth": 2.0,
+    "graceDays": 3,
+    "allocationOrder": ["penalties", "fees", "interest", "principal"],
+    "interestMethod": "declining-balance, equal instalments (annuity)",
+    "arrangementFee": "deducted at disbursement"
+  },
+  "referenceFormats": {
+    "customer": "GF-nnnnnn",
+    "application": "GLS-APP-nnnnnn",
+    "loan": "LN-YYYY-nnnn",
+    "transaction": "TXN-YYYYMMDD-XXXXXX",
+    "receipt": "RCT-YYYYMMDD-XXXXXX",
+    "disbursement": "DSB-YYYYMMDD-XXXXXX"
+  },
+  "paymentWebhooks": {
+    "path": "/api/webhooks/{mpamba|airtel|bank|paychangu}",
+    "signatureHeader": "X-GFS-Signature: sha256=HMAC_SHA256(rawBody, providerSecret)",
+    "body": { "providerRef": "string", "amount": "number", "status": "success|failed", "reason": "optional" }
+  }
+}
