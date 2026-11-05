@@ -6,9 +6,12 @@ import { HttpError } from './http.js';
 import { requireAuth } from './auth.js';
 import { PDF } from './pdf.js';
 import GFS from '../shared/core.mjs';
+import { settlementQuote, accrueInterest } from './finance.js';
+import { company } from './catalog.js';
+import { json } from './db.js';
 
-const C = GFS.COMPANY;
-const FOOT = `${C.legal} · ${C.address} · ${C.email} · ${C.phone} · Regulated by the ${C.regulator}. This document was generated electronically and is valid without a signature.`;
+const C = company();
+const FOOT = `${C.legal} · ${C.address} · ${C.email} · ${C.phone} · Generated from customer-portal records. Sandbox documents are demonstrations, not proof of a real transaction.`;
 
 function sendPDF(ctx, pdf, filename) {
   const buf = pdf.build();
@@ -30,7 +33,7 @@ export async function receiptPDF(ctx) {
   const l = r.loan_id ? q1(`SELECT * FROM loans WHERE id = ?`, r.loan_id) : null;
   const alloc = (() => { try { return JSON.parse(t.allocation); } catch { return {}; } })();
   const pdf = new PDF({ title: `Receipt ${r.ref}` });
-  pdf.header(C.name, 'Official Payment Receipt', r.ref);
+  pdf.header(C.name, 'Payment Receipt', r.ref);
   pdf.text('PAYMENT RECEIPT', { size: 16, bold: true, color: [0.02, 0.3, 0.22] }).space(6);
   pdf.kv('Receipt no.', r.ref);
   pdf.kv('Transaction ref.', t.ref);
@@ -39,7 +42,7 @@ export async function receiptPDF(ctx) {
   pdf.kv('Loan', r.loan_ref || '—');
   pdf.kv('Payment method', (GFS.PAYMENT_METHODS.find(m => m.id === r.method) || {}).name || r.method || '—');
   pdf.kv('Provider reference', t.provider_ref || '—');
-  pdf.kv('Status', 'VERIFIED');
+  pdf.kv('Status', t.environment === 'sandbox' ? 'SANDBOX VERIFIED — NO REAL MONEY MOVED' : 'VERIFIED');
   pdf.space(6).line();
   pdf.kv('AMOUNT RECEIVED', GFS.mk2(r.amount), { size: 14 });
   pdf.space(6).line();
@@ -74,6 +77,7 @@ export async function loanStatementPDF(ctx) {
   const ref = GFS.refs.statement();
   const pdf = new PDF({ title: `Statement ${l.ref}` });
   pdf.header(C.name, 'Loan Account Statement', ref);
+  if (l.environment === 'sandbox') pdf.text('SANDBOX DEMONSTRATION — NOT A REAL FINANCIAL STATEMENT', { size: 10, bold: true, color: [0.7, 0.2, 0.1] });
   pdf.text('LOAN STATEMENT', { size: 16, bold: true, color: [0.02, 0.3, 0.22] }).space(4);
   pdf.kv('Customer', `${u.first_name} ${u.last_name} (${u.customer_no})`);
   pdf.kv('Loan account', l.ref);
@@ -140,15 +144,18 @@ export async function settlementStatementPDF(ctx) {
   const u = requireAuth(ctx);
   const l = q1(`SELECT * FROM loans WHERE id = ? AND customer_id = ?`, Number(ctx.params.id), u.id);
   if (!l) throw new HttpError(404, 'Loan not found.');
-  const quote = GFS.settlementQuote(l);
+  accrueInterest(l.id);
+  const current = q1(`SELECT * FROM loans WHERE id=?`, l.id);
+  const quote = settlementQuote(current);
   const ref = GFS.refs.statement();
   const pdf = new PDF({ title: `Settlement statement ${l.ref}` });
   pdf.header(C.name, 'Early Settlement Statement', ref);
+  if (l.environment === 'sandbox') pdf.text('SANDBOX DEMONSTRATION — NO REAL MONEY MOVES', { size: 10, bold: true, color: [0.7, 0.2, 0.1] });
   pdf.text('SETTLEMENT STATEMENT', { size: 16, bold: true, color: [0.02, 0.3, 0.22] }).space(4);
   pdf.kv('Customer', `${u.first_name} ${u.last_name} (${u.customer_no})`);
   pdf.kv('Loan account', l.ref);
   pdf.kv('Quote date', GFS.fmtDate(new Date()));
-  pdf.kv('Valid for', '7 days from the quote date');
+  pdf.kv('Valid for', 'Today only; interest accrues daily');
   pdf.space(4).line();
   pdf.kv('Outstanding principal', GFS.mk2(quote.principal));
   pdf.kv('Accrued interest to date', GFS.mk2(quote.accruedInterest));
@@ -157,7 +164,7 @@ export async function settlementStatementPDF(ctx) {
   pdf.kv('TOTAL TO SETTLE TODAY', GFS.mk2(quote.total), { size: 13 });
   pdf.kv('Future interest waived', GFS.mk2(quote.futureInterestWaived));
   pdf.space(8);
-  pdf.text('Pay this amount from your portal (Loans → Settle loan) or at any branch quoting the loan reference. On receipt of the full amount the loan will be closed, all security released, and a settlement confirmation issued.', { size: 9.5 });
+  pdf.text('Pay this amount from your portal (Loans → Settle loan) or at any branch quoting the loan reference. On verification of the exact full amount the loan is settled and a confirmation is issued. Security release requires a separate authorised release record.', { size: 9.5 });
   pdf.footer(FOOT);
   sendPDF(ctx, pdf, `settlement-${l.ref}.pdf`);
 }
@@ -167,10 +174,14 @@ export async function agreementPDF(ctx) {
   const u = requireAuth(ctx);
   const a = q1(`SELECT * FROM applications WHERE id = ? AND customer_id = ?`, Number(ctx.params.id), u.id);
   if (!a) throw new HttpError(404, 'Application not found.');
-  const offer = (() => { try { return JSON.parse(a.offer); } catch { return null; } })();
+  const acceptance = q1(`SELECT * FROM agreement_acceptances WHERE application_id=?`, a.id);
+  const signedTerms = acceptance ? json(acceptance.terms_json) : null;
+  const offer = signedTerms?.offer || json(a.offer, null);
+  const clauses = signedTerms?.clauses || GFS.AGREEMENT_CLAUSES;
   const product = GFS.productById(a.product_id);
   const pdf = new PDF({ title: `Loan agreement ${a.ref}` });
   pdf.header(C.name, 'Loan Agreement', a.ref);
+  if (offer?.environment === 'sandbox') pdf.text('SANDBOX DEMONSTRATION — NOT A LIVE CREDIT CONTRACT', { size: 10, bold: true, color: [0.7, 0.2, 0.1] });
   pdf.text('LOAN AGREEMENT', { size: 16, bold: true, color: [0.02, 0.3, 0.22] }).space(4);
   pdf.kv('Borrower', `${u.first_name} ${u.last_name} (${u.customer_no})`);
   pdf.kv('Application', a.ref);
@@ -185,7 +196,7 @@ export async function agreementPDF(ctx) {
     pdf.kv('Net disbursement', GFS.mk2(offer.netDisbursement));
   }
   pdf.space(4).line().space(4);
-  for (const c of GFS.AGREEMENT_CLAUSES) {
+  for (const c of clauses) {
     pdf.text(c.t, { size: 10.5, bold: true, color: [0.02, 0.3, 0.22], gap: 2 });
     pdf.text(c.b, { size: 9, gap: 3 });
     pdf.space(4);
@@ -194,10 +205,10 @@ export async function agreementPDF(ctx) {
   if (a.agreement_accepted_at) {
     pdf.text('ELECTRONIC ACCEPTANCE', { size: 11, bold: true, color: [0.02, 0.3, 0.22] }).space(2);
     pdf.kv('Signed by', a.agreement_name || `${u.first_name} ${u.last_name}`);
-    pdf.kv('ID number', a.agreement_id_number || '—');
+    pdf.kv('Terms hash', acceptance?.terms_hash || 'Not yet signed');
     pdf.kv('Signed at', GFS.fmtDateTime(a.agreement_accepted_at));
     pdf.kv('Signature', a.agreement_signature && a.agreement_signature.startsWith('data:') ? '[drawn signature on file]' : (a.agreement_signature || '—'));
-    pdf.text('This agreement was accepted electronically in the Golden Financial Services customer portal. The electronic signature is as binding as a handwritten signature under clause 13.', { size: 8.5, color: [0.35, 0.4, 0.47] });
+    pdf.text('Electronic acceptance is retained with a terms hash, timestamp and encrypted signature. Sandbox acceptance is a demonstration, not a live credit contract.', { size: 8.5, color: [0.35, 0.4, 0.47] });
   } else {
     pdf.text('NOT YET ACCEPTED — this is a draft offer for review.', { size: 10, bold: true, color: [0.7, 0.2, 0.1] });
   }
@@ -227,7 +238,7 @@ export async function disbursementPDF(ctx) {
   pdf.kv('Repayment frequency', l.freq);
   pdf.kv('Term', `${l.term_months} months`);
   pdf.space(8);
-  pdf.text('The net amount above has been sent to your nominated account. Your full repayment schedule is available in the customer portal and on your loan statement.', { size: 9.5 });
+  pdf.text(l.environment === 'sandbox' ? 'SANDBOX ONLY: no real funds were sent. This record demonstrates the disbursement workflow.' : 'Disbursement confirmed by the back-office/provider record. Your repayment schedule is available in the customer portal.', { size: 9.5 });
   pdf.footer(FOOT);
   sendPDF(ctx, pdf, `disbursement-${l.ref}.pdf`);
 }

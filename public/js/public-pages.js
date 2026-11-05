@@ -1,412 +1,59 @@
-/* Public website — all 30 public pages. Content + interactive tools. */
+/* Rebuilt public website: product discovery, planning tools and clear
+   boundaries between estimates, applications and verified financial records. */
 'use strict';
 (() => {
-  const C = () => (App.config && App.config.company) || GFS.COMPANY;
-  const P = () => (App.config && App.config.products) || GFS.PRODUCTS;
-  const esc = UI.esc;
+  const esc = UI.esc, P = () => App.products(), C = () => App.company();
+  const hero = (eyebrow, title, text, actions = '') => `<section class="page-hero"><div class="container"><span class="eyebrow">${esc(eyebrow)}</span><h1>${title}</h1><p>${esc(text)}</p>${actions ? `<div class="hero-cta">${actions}</div>` : ''}</div></section>`;
+  const sectionHead = (eyebrow, title, text = '') => `<div class="sec-head"><span class="eyebrow">${esc(eyebrow)}</span><h2>${esc(title)}</h2>${text ? `<p class="muted">${esc(text)}</p>` : ''}</div>`;
+  const productCard = p => `<a class="product-card" href="#/loans/${p.id}" style="--pc:${esc(p.colour || '#0E9F6E')}"><div class="product-card-top"><span class="p-icon">${UI.productIcon(p.id)}</span><span class="product-rate">${p.rate}%<small>/month</small></span></div><h3>${esc(p.name)}</h3><p>${esc(p.tagline)}</p><div class="product-range">${GFS.mk(p.min)} – ${GFS.mk(p.max)}</div><div class="product-card-foot"><span>${p.terms[0]}–${p.terms[p.terms.length - 1]} months</span><span>${p.fee}% fee</span><b>Explore ${UI.icon('arrow')}</b></div></a>`;
+  const sandboxNotice = () => API.mode === 'local' || App.config?.mode === 'sandbox' ? `<div class="container"><div class="sandbox-banner">${UI.icon('flask')}<div><b>You’re exploring a sandbox.</b> Applications, approvals and payments are demonstrations. No real money moves and no external identity checks are performed.</div></div></div>` : '';
+  function scheduleTable(s) { return UI.table(['#', 'Due date', 'Opening balance', 'Instalment', 'Principal', 'Interest', 'Closing balance'], s.rows.map(r => [r.no, GFS.fmtDate(r.dueDate), GFS.mk2(r.opening), GFS.mk2(r.installment), GFS.mk2(r.principal), GFS.mk2(r.interest), GFS.mk2(r.closing)]), { numCols: [2, 3, 4, 5, 6] }); }
+  function downloadCSV(s, name = 'repayment-schedule.csv') { const rows = [['Period', 'Due date', 'Opening', 'Instalment', 'Principal', 'Interest', 'Closing'], ...s.rows.map(r => [r.no, r.dueDate, r.opening, r.installment, r.principal, r.interest, r.closing])]; const blob = new Blob([rows.map(r => r.join(',')).join('\n')], { type: 'text/csv' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
 
-  /* ---------------- 1. HOME ---------------- */
-  App.route('/', {
-    title: 'Loans in Malawi', nav: '/', render: async () => {
-      const anns = (App.config && App.config.announcements) || [];
-      return `
-      <section class="hero"><div class="container">
-        <div>
-          <span class="eyebrow">🇲🇼 Licensed lending · Malawi Kwacha</span>
-          <h1>Finance your goals with <span class="gold">Golden Financial Services</span></h1>
-          <p class="lead">Personal, business, emergency, salary advance, agricultural, education, medical, asset, group and mortgage loans — apply online in minutes, track every step, and repay with TNM Mpamba, Airtel Money or bank transfer.</p>
-          <div class="hero-cta"><a href="#/apply" class="btn btn-gold btn-lg">Apply for a Loan →</a><a href="#/calculator" class="btn btn-ghost btn-lg" style="background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.4)">Loan Calculator</a></div>
-          <div class="hero-stats"><div class="hs"><b>10</b><span>Loan products</span></div><div class="hs"><b>MK 80M</b><span>Max mortgage</span></div><div class="hs"><b>24 hrs</b><span>Typical decision</span></div><div class="hs"><b>4</b><span>Branches nationwide</span></div></div>
-        </div>
-        <img class="hero-logo" src="assets/logo.png" alt="Golden Financial Services emblem">
-      </div></section>
-      ${anns.length ? `<div class="container" style="margin-top:18px"><div class="alert alert-info">📢 <div><b>${esc(anns[0].title)}</b> — ${esc(anns[0].body)} <a href="#/announcements">All announcements →</a></div></div></div>` : ''}
-      <section class="section"><div class="container">
-        <div class="sec-head"><span class="eyebrow">Loan Products</span><h2>Borrowing made clear, from MK 20,000 to MK 80,000,000</h2><p class="muted">Every product shows its full range, monthly rate on the declining balance, arrangement fee and terms — before you apply.</p></div>
-        <div class="grid grid-3">${P().map(p => `
-          <a class="product-card" style="--pc:${p.colour};text-decoration:none;color:inherit" href="#/loans/${p.id}">
-            <div class="p-icon">${UI.productIcon(p.id)}</div><h3>${esc(p.name)}</h3>
-            <div class="p-range">${GFS.mk(p.min)} – ${GFS.mk(p.max)}</div>
-            <p class="muted small mb-0">${esc(p.tagline)}</p>
-            <div class="p-meta"><span class="pill">${p.rate}%/month</span><span class="pill">${p.fee}% fee</span><span class="pill">${p.terms[p.terms.length - 1]} mo max</span></div>
-          </a>`).join('')}</div>
-      </div></section>
-      <section class="section" style="background:#fff;border-block:1.5px solid var(--line)"><div class="container">
-        <div class="sec-head"><span class="eyebrow">How it works</span><h2>From application to money in your account — four steps</h2></div>
-        <div class="grid grid-4">
-          ${[['1', 'Register & verify', 'Create your account, verify your phone and email, and upload your ID securely.'], ['2', 'Apply online', 'Choose a product, amount and term. Add a guarantor and submit — get a GLS-APP reference instantly.'], ['3', 'Get a decision', 'Automated assessment checks affordability and documents. Most decisions within 24 hours.'], ['4', 'Sign & receive', 'Accept your agreement electronically and receive funds via Mpamba, Airtel Money or bank.']].map(([n, t, b]) => `<div class="step"><div class="s-no">${n}</div><div><h3 style="font-size:15.5px">${t}</h3><p class="muted small mb-0">${b}</p></div></div>`).join('')}
-        </div>
-        <div class="center mt-3"><a href="#/how-it-works" class="btn btn-emerald">See the full process →</a></div>
-      </div></section>
-      <section class="section"><div class="container">
-        <div class="grid grid-2" style="align-items:center">
-          <div><span class="eyebrow">Plan before you borrow</span><h2>Know every kwacha before you sign</h2><p class="muted">Our calculator shows your instalment, total interest, arrangement fee, total repayable and a full amortisation schedule — daily, weekly, fortnightly or monthly. No surprises.</p>
-            <div class="feature mb-2"><div class="f-icon">📉</div><div><b>Declining-balance interest</b><p class="muted small mb-0">Interest is charged only on what you still owe, so it falls with every payment.</p></div></div>
-            <div class="feature mb-2"><div class="f-icon">🧾</div><div><b>One clear fee</b><p class="muted small mb-0">A single arrangement fee (1.0%–2.5%) deducted at disbursement. No hidden charges.</p></div></div>
-            <div class="feature"><div class="f-icon">🕊️</div><div><b>Free early settlement</b><p class="muted small mb-0">Settle anytime and all future interest is waived.</p></div></div>
-            <a href="#/calculator" class="btn btn-gold mt-3">Try the calculator →</a></div>
-          <div class="card card-accent"><h3>💡 Quick example</h3><p class="muted small">Business loan · MK 1,500,000 · 12 months · 3.5%/month</p><div id="home-calc">${UI.loading('Computing example…')}</div></div>
-        </div>
-      </div></section>
-      <section class="section" style="background:linear-gradient(135deg,var(--emerald-deep),#0A3D30);color:#fff"><div class="container">
-        <div class="sec-head"><span class="eyebrow" style="color:var(--gold-light)">Why Golden</span><h2 style="color:#fff">A lender that works the way you do</h2></div>
-        <div class="grid grid-3">
-          ${[['📱', 'Mobile-first portal', 'Apply, track, repay and download statements from any Android phone, iPhone, tablet or computer.'], ['⚡', 'Instant payment confirmation', 'Verified Mpamba and Airtel Money payments update your balance immediately and issue a receipt.'], ['🔐', 'Bank-grade security', 'Hashed passwords, encrypted documents, two-factor authentication and a full audit trail.'], ['🤝', 'Human support', 'AI assistant for instant answers, plus a real customer care team for everything else.'], ['🌾', 'Built for Malawi', 'Season-aware agricultural loans, group lending, salary advances aligned to payday.'], ['🔗', 'One connected system', 'Your portal is linked to the Golden Loan Services back-office — one record, everywhere.']].map(([i, t, b]) => `<div class="card" style="background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.18)"><div style="font-size:26px">${i}</div><h3 style="color:#fff;font-size:16px">${t}</h3><p style="color:#CFE8DD;font-size:13px" class="mb-0">${b}</p></div>`).join('')}
-        </div>
-      </div></section>
-      <section class="section"><div class="container">
-        <div class="sec-head"><span class="eyebrow">Testimonials</span><h2>Trusted across Malawi</h2></div>
-        <div class="grid grid-3">${GFS.TESTIMONIALS.slice(0, 3).map(t => `<div class="testimonial"><div class="stars">${'★'.repeat(t.rating)}${'☆'.repeat(5 - t.rating)}</div><blockquote>“${esc(t.text)}”</blockquote><div class="t-who">${esc(t.name)} · ${esc(t.place)}</div><div class="tiny muted">${esc(t.product)}</div></div>`).join('')}</div>
-        <div class="center mt-3"><a href="#/testimonials" class="btn btn-ghost">Read more stories →</a></div>
-      </div></section>
-      <section class="section-tight"><div class="container"><div class="cta-band">
-        <div><h2>Ready to grow with Golden?</h2><p>Register in two minutes and check your eligibility instantly — no obligation.</p></div>
-        <div class="flex"><a href="#/register" class="btn btn-gold btn-lg">Create Account</a><a href="#/eligibility" class="btn btn-ghost btn-lg" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.5)">Check Eligibility</a></div>
-      </div></div></section>`;
-    },
-    mount: async el => {
-      const d = await API.post('/api/calculator', { productId: 'BL', amount: 1500000, term: 12 });
-      const s = d.schedule;
-      el.querySelector('#home-calc').innerHTML = `
-        <div class="stat-row" style="grid-template-columns:1fr 1fr">
-          <div class="kpi emerald"><div class="k-label">Monthly instalment</div><div class="k-value">${GFS.mk(s.installment)}</div></div>
-          <div class="kpi"><div class="k-label">Total repayable</div><div class="k-value">${GFS.mk(s.totalRepayable)}</div></div>
-        </div>
-        <div class="mt-2 small muted">Total interest ${GFS.mk(s.totalInterest)} · arrangement fee ${GFS.mk(s.fee)} · net disbursement ${GFS.mk(s.netDisbursement)}</div>
-        <a href="#/calculator" class="btn btn-emerald btn-block mt-2">Calculate your own →</a>`;
-    }
-  });
+  App.route('/', { title: 'Loans in Malawi', nav: '/', render: async () => {
+    const ann = App.config?.announcements?.[0];
+    return `<section class="home-hero"><div class="container home-hero-grid"><div class="home-copy"><span class="eyebrow light">${UI.icon('pin')} Built for Malawi · Borrow in MWK</span><h1>Your goals deserve<br><span>golden support.</span></h1><p>Personal, business, agricultural and everyday financing — with clear terms, a secure customer portal and repayment options that fit your life.</p><div class="hero-cta"><a href="#/apply" class="btn btn-gold btn-lg">Start an application ${UI.icon('arrow')}</a><a href="#/calculator" class="btn btn-hero-ghost btn-lg">Plan my repayments</a></div><div class="hero-trust"><span>${UI.icon('shield')} Encrypted documents</span><span>${UI.icon('check')} Clear pricing</span><span>${UI.icon('phone')} Mobile-friendly</span></div></div>
+      <div class="hero-visual"><div class="hero-orbit orbit-one"></div><div class="hero-orbit orbit-two"></div><div class="hero-logo-seal"><img src="assets/logo.png" alt="Golden Financial Services emblem"></div><div class="floating-card fc-top">${UI.icon('wallet')}<div><small>Financing options</small><b>10 loan products</b></div></div><div class="floating-card fc-bottom">${UI.icon('chart')}<div><small>Plan with confidence</small><b>Know every kwacha</b></div></div></div></div></section>
+      ${sandboxNotice()}${ann ? `<div class="container announcement-strip">${UI.icon('bell')}<div><b>${esc(ann.title)}</b><span>${esc(ann.body)}</span></div><a href="#/announcements">Read more ${UI.icon('arrow')}</a></div>` : ''}
+      <section class="quick-quote-section"><div class="container"><div class="quick-quote card"><div class="qq-intro"><span class="eyebrow">Quick estimate</span><h2>What could your repayment look like?</h2><p>Move the amount and choose a product. This is an estimate, not a loan offer.</p></div><form id="home-quote" class="qq-controls"><div class="field"><label for="hq-product">Loan product</label><select id="hq-product" name="productId">${P().map(p => `<option value="${p.id}" ${p.id === 'PL' ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div><div class="field"><label for="hq-amount">Amount <output id="hq-amount-label">MK 300,000</output></label><input id="hq-amount" name="amount" type="range" min="50000" max="1000000" step="10000" value="300000"></div><div class="field"><label for="hq-term">Term</label><select id="hq-term" name="term"></select></div><div class="qq-result" id="hq-result" aria-live="polite">${UI.loading('Calculating…')}</div></form></div></div></section>
+      <section class="section"><div class="container">${sectionHead('Loan products', 'Financing for work, family and the future', 'Compare ten products with published amounts, monthly declining rates, arrangement fees and terms.')}<div class="product-grid">${P().map(productCard).join('')}</div><div class="center mt-3"><a href="#/loans" class="btn btn-ghost">Compare all products ${UI.icon('arrow')}</a></div></div></section>
+      <section class="section process-section"><div class="container">${sectionHead('Simple process', 'From planning to progress', 'Every step has a reference and a status you can follow in your portal.')}<div class="process-grid">${[['01', 'Plan', 'Use the calculator and eligibility check to choose a comfortable amount and term.', 'chart'], ['02', 'Apply', 'Create your account, verify contact details, upload documents and submit your application.', 'file'], ['03', 'Review', 'Track identity, affordability and credit review. Approval is never automatic in live mode.', 'shield'], ['04', 'Grow', 'Sign an approved offer, follow disbursement, repay and download your records.', 'leaf']].map(([n, t, b, i]) => `<article class="process-card"><span class="process-number">${n}</span><span class="process-icon">${UI.icon(i)}</span><h3>${t}</h3><p>${b}</p></article>`).join('')}</div><div class="center mt-3"><a href="#/how-it-works" class="text-link">See the full application process ${UI.icon('arrow')}</a></div></div></section>
+      <section class="section portal-showcase"><div class="container showcase-grid"><div><span class="eyebrow">Your money, in view</span><h2>A customer portal that does more than show a balance</h2><p class="lead muted">Apply, track decisions, upload documents, request top-ups, make payments, download statements and get support — all from one place.</p><div class="showcase-features">${[['wallet', 'Live loan records', 'Schedules, outstanding balances and verified repayment history.'], ['id', 'Secure documents & KYC', 'Encrypted uploads with separate review status.'], ['receipt', 'Receipts & statements', 'Printable financial records with unique references.'], ['headset', 'Assistant + human handoff', 'Automated guidance and tracked support tickets.']].map(([i, t, b]) => `<div class="feature"><span class="f-icon">${UI.icon(i)}</span><div><b>${t}</b><p>${b}</p></div></div>`).join('')}</div><a href="#/portal" class="btn btn-emerald mt-2">Open customer portal ${UI.icon('arrow')}</a></div><div class="portal-preview-card"><div class="pp-head"><span class="pp-logo"><img src="assets/logo.png" alt=""></span><div><b>My financial overview</b><small>Customer portal preview</small></div><span class="mode-chip sandbox">Sample</span></div><div class="pp-balance"><small>Outstanding balance</small><b>MK 1,064,296</b><span>Sample business loan · LN-2026-0002</span></div><div class="pp-progress"><div style="width:38%"></div></div><div class="pp-row"><span>Principal progress</span><b>38%</b></div><div class="pp-actions"><span>${UI.icon('card')} Make a payment</span><span>${UI.icon('download')} Statement</span><span>${UI.icon('chat')} Get help</span></div><p class="tiny muted">Illustrative interface preview. Sign in to see your own records.</p></div></div></section>
+      <section class="section security-section"><div class="container security-grid"><div class="security-seal">${UI.icon('shield')}</div><div><span class="eyebrow">Security & trust</span><h2>Protecting your records is part of the service</h2><p>Hashed passwords, optional two-factor sign-in, encrypted documents, own-record access controls, idle logout and an append-only financial audit trail.</p><div class="security-pills"><span>${UI.icon('lock')} AES-256-GCM documents</span><span>${UI.icon('check')} Verified-payment posting</span><span>${UI.icon('clock')} Session controls</span></div><a href="#/privacy" class="text-link">Read our privacy approach ${UI.icon('arrow')}</a></div></div></section>
+      <section class="section-tight"><div class="container"><div class="cta-band"><div><span class="eyebrow light">Take the next step</span><h2>Ready to plan your next move?</h2><p>Check eligibility first, then apply when the numbers work for you.</p></div><div class="flex wrap"><a href="#/eligibility" class="btn btn-hero-ghost btn-lg">Check eligibility</a><a href="#/apply" class="btn btn-gold btn-lg">Apply now ${UI.icon('arrow')}</a></div></div></div></section>`;
+  }, mount: async el => {
+    const form = el.querySelector('#home-quote'), productSel = form.elements.productId, amount = form.elements.amount, term = form.elements.term, label = el.querySelector('#hq-amount-label'), result = el.querySelector('#hq-result');
+    let version = 0;
+    const syncProduct = () => { const p = P().find(x => x.id === productSel.value); amount.min = p.min; amount.max = p.max; amount.step = Math.max(1000, Math.round((p.max - p.min) / 100 / 1000) * 1000); amount.value = Math.min(p.max, Math.max(p.min, 300000)); term.innerHTML = p.terms.map(t => `<option value="${t}" ${t === 12 || (p.terms.length < 4 && t === p.terms[p.terms.length - 1]) ? 'selected' : ''}>${t} month${t > 1 ? 's' : ''}</option>`).join(''); };
+    const update = async () => { const v = ++version; label.textContent = GFS.mk(amount.value); result.setAttribute('aria-busy', 'true'); try { const d = await API.post('/api/calculator', { productId: productSel.value, amount: Number(amount.value), term: Number(term.value) }); if (v !== version) return; const s = d.schedule; result.innerHTML = `<small>Estimated ${esc(d.inputs.freq)} instalment</small><strong>${GFS.mk(s.installment)}</strong><span>Total repayable ${GFS.mk(s.totalRepayable)} · fee ${GFS.mk(s.fee)}</span><a href="#/calculator?product=${productSel.value}&amount=${amount.value}&term=${term.value}" class="text-link">Full schedule ${UI.icon('arrow')}</a>`; } catch (e) { if (v === version) result.innerHTML = `<span class="error-text">${esc(e.message)}</span>`; } finally { if (v === version) result.setAttribute('aria-busy', 'false'); } };
+    productSel.addEventListener('change', () => { syncProduct(); update(); }); amount.addEventListener('input', () => { label.textContent = GFS.mk(amount.value); }); amount.addEventListener('change', update); term.addEventListener('change', update); syncProduct(); await update();
+  } });
 
-  /* ---------------- 2. ABOUT ---------------- */
-  App.route('/about', { title: 'About Us', nav: '/about', render: async () => `
-    <div class="container section">
-      <div class="sec-head"><span class="eyebrow">About Us</span><h1>Growing Malawi, one loan at a time</h1>
-      <p class="lead muted">Golden Financial Services Limited is a Malawian lending company headquartered in Lilongwe. Since ${C().founded} we have helped traders, farmers, salaried employees, students and families access fair, transparent credit in Malawi Kwacha.</p></div>
-      <div class="grid grid-2">
-        <div class="card card-accent"><h3>🎯 Our mission</h3><p>To make responsible credit accessible to every Malawian — with clear pricing, fast decisions and a portal that puts customers in control of their borrowing.</p><h3>👁️ Our vision</h3><p class="mb-0">To be Malawi's most trusted digital lender, known for fairness, speed and the success of the businesses and families we finance.</p></div>
-        <div class="card"><h3>💎 Our values</h3>
-          ${[['Transparency', 'Every rate, fee and penalty is shown before you sign.'], ['Respect', 'We treat every customer fairly, especially in difficulty.'], ['Speed', 'Most complete applications are decided within 24 hours.'], ['Security', 'Your data is encrypted and never sold.'], ['Community', 'We lend to grow Malawian enterprise, not to trap it.']].map(([t, b]) => `<div class="feature mb-1"><div class="f-icon">✓</div><div><b>${t}</b><div class="muted small">${b}</div></div></div>`).join('')}
-        </div>
-      </div>
-      <div class="grid grid-4 mt-3">
-        ${[['2018', 'Founded in Lilongwe'], ['4', 'Branches nationwide'], ['10', 'Loan products'], ['MWK', 'All lending in Kwacha']].map(([v, l]) => `<div class="kpi"><div class="k-value">${v}</div><div class="k-sub">${l}</div></div>`).join('')}
-      </div>
-      <div class="card mt-3"><h3>🔗 One connected platform</h3><p class="mb-0">This website and customer portal are linked to the <a href="${C().adminSystem}" target="_blank" rel="noopener">Golden Loan Services</a> back-office system. Applications, payments and statements share one central record, and system settings — products, rates and fees — are managed by the back-office, never by customers. <a href="#/contact">Talk to us →</a></p></div>
-    </div>` });
+  App.route('/about', { title: 'About us', nav: '/about', render: async () => `${hero('About Golden', 'Financial growth, built on clarity', 'Golden Financial Services provides Malawi Kwacha lending tools for individuals, traders, farmers, students and families.', '<a href="#/services" class="btn btn-gold">Explore our services</a>')}<section class="section"><div class="container"><div class="grid grid-2"><article class="card card-accent"><span class="eyebrow">Our purpose</span><h2>Responsible credit that people can understand</h2><p>We believe borrowers should see the amount, term, rate, fee, repayment schedule and decision status before they commit. Our digital portal keeps those records together.</p><p class="mb-0">This website is the customer-facing part of the Golden Financial Services platform. Administration lives in the separate Golden Loan Services system.</p></article><article class="card"><h3>What guides us</h3>${[['Transparency', 'Published pricing and downloadable agreements.'], ['Security', 'Encrypted documents and controlled access to personal records.'], ['Control', 'Customers manage their own profiles and requests, never system settings.'], ['Support', 'Automated guidance plus a clear route to human review.']].map(([t, b]) => `<div class="feature"><span class="f-icon">${UI.icon('check')}</span><div><b>${t}</b><p>${b}</p></div></div>`).join('')}</article></div><div class="alert alert-info mt-3">${UI.icon('alert')}<div>Company registration, licensing and contact details should be confirmed against official Golden Financial Services records before production launch. This build does not invent a regulatory licence number.</div></div></div></section>` });
+  App.route('/services', { title: 'Services', nav: '/services', render: async () => `${hero('Our services', 'More than a loan application', 'A complete customer journey from planning and application through repayment, records and support.')}<section class="section"><div class="container"><div class="grid grid-3">${[['wallet', 'Ten loan products', 'Personal, business, emergency, salary advance, agricultural, education, medical, asset, group and mortgage financing.'], ['chart', 'Planning tools', 'Repayment calculator, affordability guidance and product recommendations.'], ['file', 'Digital applications', 'Multi-step applications, document uploads, guarantors, collateral and tracked decisions.'], ['card', 'Repayment management', 'Partial, advance and early-settlement workflows with verified balance updates.'], ['documents', 'Financial records', 'Receipts, loan statements, settlement statements, disbursement records and agreements.'], ['headset', 'Customer support', 'Automated assistant, human-handoff tickets, complaints and feedback.']].map(([i, t, b]) => `<article class="card service-card"><span class="service-icon">${UI.icon(i)}</span><h3>${t}</h3><p>${b}</p></article>`).join('')}</div></div></section>` });
 
-  /* ---------------- 3. SERVICES ---------------- */
-  App.route('/services', { title: 'Our Services', nav: '/services', render: async () => `
-    <div class="container section">
-      <div class="sec-head"><span class="eyebrow">Our Services</span><h1>More than loans — a full financial service</h1></div>
-      <div class="grid grid-3">
-        ${[['💰', 'Lending', 'Ten loan products from MK 20,000 emergency cash to MK 80,000,000 mortgages, all priced on the declining balance.', '/loans'],
-          ['📱', 'Digital customer portal', 'Apply, track, sign agreements, repay, download statements and receipts — from any device.', '/register'],
-          ['💳', 'Payment services', 'Repay with TNM Mpamba, Airtel Money, FDH or Standard Bank transfer, or cash at any branch.', '/repayment-methods'],
-          ['🧮', 'Financial tools', 'Loan calculator with full amortisation, eligibility checker and smart product recommendations.', '/calculator'],
-          ['🎧', 'Customer support', 'AI assistant for instant answers plus human agents, tickets and complaint tracking.', '/contact'],
-          ['📑', 'Records & statements', 'PDF loan statements, payment receipts, settlement statements and signed agreements on demand.', '/login']].map(([i, t, b, h]) => `<a class="product-card" href="#${h}" style="color:inherit"><div class="p-icon">${i}</div><h3>${t}</h3><p class="muted small mb-0">${b}</p><span class="emerald-text small" style="font-weight:700">Learn more →</span></a>`).join('')}
-      </div>
-    </div>` });
+  App.route('/loans', { title: 'Loan products', nav: '/loans', render: async () => `${hero('Loan products', 'Choose financing that fits your goal', 'Compare all ten products. Final eligibility depends on identity, affordability, security and credit review.', '<a href="#/eligibility" class="btn btn-gold">Check eligibility</a>')}<section class="section"><div class="container"><div class="filter-bar"><label class="search-field">${UI.icon('search')}<input id="product-search" type="search" placeholder="Search products or purposes…" aria-label="Search loan products"></label><a href="#/rates" class="btn btn-ghost btn-sm">View rates & fees</a></div><div class="product-grid" id="product-grid">${P().map(productCard).join('')}</div><div class="card mt-3"><h3>Side-by-side comparison</h3>${UI.table(['Product', 'Range', 'Monthly rate', 'Fee', 'Terms', 'Guarantors', 'Security'], P().map(p => [`<a href="#/loans/${p.id}">${esc(p.name)}</a>`, `${GFS.mk(p.min)}–${GFS.mk(p.max)}`, `${p.rate}%`, `${p.fee}%`, p.terms.join(', ') + ' months', p.guarantors, p.collateral ? 'May be required' : 'Unsecured']))}</div></div></section>`, mount: el => { const input = el.querySelector('#product-search'); input.addEventListener('input', () => { const q = input.value.toLowerCase(); el.querySelector('#product-grid').innerHTML = P().filter(p => `${p.name} ${p.tagline} ${p.blurb} ${p.uses.join(' ')}`.toLowerCase().includes(q)).map(productCard).join('') || UI.empty(UI.icon('search'), 'No products match', 'Try a different search.'); }); } });
+  App.route('/loans/:id', { title: 'Loan product', nav: '/loans', render: async ({ id }) => { const p = P().find(x => x.id === id); if (!p) throw new Error('Loan product not found.'); return `${hero('Loan product', esc(p.name), p.blurb, `<a href="#/apply?product=${p.id}" class="btn btn-gold">Apply for ${esc(p.name)} ${UI.icon('arrow')}</a><a href="#/calculator?product=${p.id}" class="btn btn-hero-ghost">Calculate repayments</a>`)}<section class="section"><div class="container"><div class="product-detail-grid"><div><div class="kpis product-kpis"><div class="kpi"><div class="k-label">Amount range</div><div class="k-value">${GFS.mk(p.min)} – ${GFS.mk(p.max)}</div></div><div class="kpi emerald"><div class="k-label">Monthly declining rate</div><div class="k-value">${p.rate}%</div></div><div class="kpi"><div class="k-label">Arrangement fee</div><div class="k-value">${p.fee}%</div><div class="k-sub">Deducted at disbursement</div></div></div><article class="card mt-2"><h3>What you can use it for</h3><div class="use-pills">${p.uses.map(u => `<span class="pill">${esc(u)}</span>`).join('')}</div><h3 class="mt-3">Available terms</h3><p>${p.terms.join(', ')} months · ${p.freqs.join(', ')} repayments.</p><h3>Security</h3><p class="mb-0">${p.collateral ? 'Collateral may be required, especially for larger amounts. A professional valuation is needed before it can secure a loan.' : 'Generally unsecured, subject to affordability and credit assessment.'} ${p.guarantors ? `${p.guarantors} guarantor(s) required.` : 'No guarantor required for the standard product.'}</p></article></div><aside class="card card-accent"><h3>Requirements</h3><ul class="check-list">${p.eligibility.map(x => `<li>${UI.icon('check')}<span>${esc(x)}</span></li>`).join('')}</ul><a href="#/requirements" class="text-link">Full document checklist ${UI.icon('arrow')}</a><hr class="divider"><p class="small muted">Rates and fees are published settings, read-only for customers. An application is not an approval.</p><a href="#/eligibility?product=${p.id}" class="btn btn-emerald btn-block">Check my eligibility</a></aside></div></div></section>`; } });
 
-  /* ---------------- 4. LOAN PRODUCTS ---------------- */
-  App.route('/loans', { title: 'Loan Products', nav: '/loans', render: async () => `
-    <div class="container section">
-      <div class="sec-head"><span class="eyebrow">Loan Products</span><h1>Find the right loan for your goal</h1><p class="muted">Compare all ten products. Rates are monthly on the declining balance; the arrangement fee is deducted at disbursement.</p></div>
-      <div class="table-wrap mb-2"><table class="tbl"><thead><tr><th>Product</th><th class="num">Minimum</th><th class="num">Maximum</th><th class="num">Rate/mo</th><th class="num">Fee</th><th>Terms (months)</th><th></th></tr></thead>
-      <tbody>${P().map(p => `<tr><td><b>${UI.productIcon(p.id)} ${esc(p.name)}</b></td><td class="num">${GFS.mk(p.min)}</td><td class="num">${GFS.mk(p.max)}</td><td class="num">${p.rate}%</td><td class="num">${p.fee}%</td><td>${p.terms.join(', ')}</td><td><a class="btn btn-ghost btn-sm" href="#/loans/${p.id}">Details</a></td></tr>`).join('')}</tbody></table></div>
-      <div class="grid grid-3">${P().map(p => `<a class="product-card" style="--pc:${p.colour};color:inherit" href="#/loans/${p.id}"><div class="p-icon">${UI.productIcon(p.id)}</div><h3>${esc(p.name)}</h3><p class="muted small">${esc(p.blurb)}</p><div class="p-range">${GFS.mk(p.min)} – ${GFS.mk(p.max)}</div><div class="p-meta"><span class="pill">${p.rate}%/mo</span><span class="pill">${p.fee}% fee</span></div></a>`).join('')}</div>
-    </div>` });
+  App.route('/calculator', { title: 'Loan calculator', render: async (_, q) => { const selected = P().find(p => p.id === q.product) || P()[0]; return `${hero('Planning tool', 'Know every kwacha before you borrow', 'Estimate instalments, total interest, arrangement fees and a full repayment schedule. Actual interest accrues daily on unpaid principal.')}<section class="section"><div class="container"><div class="calculator-layout"><form class="card card-accent" id="calc-form"><h3>Build your estimate</h3><div class="field"><label for="calc-product">Product</label><select id="calc-product" name="productId">${P().map(p => `<option value="${p.id}" ${p.id === selected.id ? 'selected' : ''}>${esc(p.name)} · ${p.rate}%/month</option>`).join('')}</select></div><div class="field"><label for="calc-amount">Amount (MWK)</label><input id="calc-amount" name="amount" type="number" min="${selected.min}" max="${selected.max}" step="1000" value="${q.amount || Math.min(selected.max, Math.max(selected.min, 500000))}" required></div><div class="form-grid"><div class="field"><label for="calc-term">Term</label><select id="calc-term" name="term"></select></div><div class="field"><label for="calc-freq">Frequency</label><select id="calc-freq" name="freq"></select></div></div><button class="btn btn-gold btn-block" type="submit">Calculate schedule ${UI.icon('arrow')}</button><p class="hint mt-2">Estimates use published product settings. They are not a credit offer.</p></form><div id="calc-output" aria-live="polite">${UI.loading('Calculating…')}</div></div><div class="card mt-3" id="calc-schedule"></div></div></section>`; }, mount: async (el, _, q) => {
+    const form = el.querySelector('#calc-form'), product = form.elements.productId, amount = form.elements.amount, term = form.elements.term, freq = form.elements.freq, output = el.querySelector('#calc-output'), scheduleEl = el.querySelector('#calc-schedule'); let last;
+    const sync = () => { const p = P().find(x => x.id === product.value); amount.min = p.min; amount.max = p.max; term.innerHTML = p.terms.map(t => `<option value="${t}" ${String(t) === String(q.term) ? 'selected' : ''}>${t} months</option>`).join(''); freq.innerHTML = p.freqs.map(f => `<option value="${f}">${f[0].toUpperCase() + f.slice(1)}</option>`).join(''); };
+    const calculate = async () => { const d = await API.post('/api/calculator', UI.formData(form)); last = d.schedule; const s = last; output.innerHTML = `<div class="calc-result-card"><span class="eyebrow">Your estimated instalment</span><strong>${GFS.mk2(s.installment)}</strong><span>per ${esc(d.inputs.freq)} period</span><div class="calc-breakdown">${[['Principal', GFS.mk2(s.principal)], ['Estimated interest', GFS.mk2(s.totalInterest)], ['Arrangement fee', GFS.mk2(s.fee)], ['Total repayable', GFS.mk2(s.totalRepayable)], ['Net disbursement', GFS.mk2(s.netDisbursement)], ['Final due date', GFS.fmtDate(s.endDate)]].map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('')}</div><div class="flex wrap mt-2"><button class="btn btn-ghost btn-sm" id="csv-btn" type="button">${UI.icon('download')} Download CSV</button><a class="btn btn-emerald btn-sm" href="#/apply?product=${product.value}&amount=${amount.value}&term=${term.value}">Apply with these details</a></div></div>`; scheduleEl.innerHTML = `<div class="flex-between"><h3>Illustrative repayment schedule</h3><span class="pill">${s.rows.length} payments</span></div>${scheduleTable(s)}`; el.querySelector('#csv-btn').onclick = () => downloadCSV(s); };
+    product.addEventListener('change', () => { sync(); calculate().catch(e => UI.toast(e.message, 'err')); }); UI.bindForm(form, calculate); sync(); await calculate();
+  } });
 
-  /* ---------------- 5–14. INDIVIDUAL PRODUCTS ---------------- */
-  App.route('/loans/:id', {
-    title: 'Loan Product', render: async ({ id }) => {
-      const p = GFS.productById(id);
-      if (!p) return `<div class="container section">${UI.empty('🔍', 'Product not found', '', '<a class="btn btn-gold" href="#/loans">All products</a>')}</div>`;
-      const q = GFS.amortize({ amount: Math.round((p.min + Math.min(p.max, p.min * 6)) / 2), monthlyPct: p.rate, termMonths: p.terms[Math.min(1, p.terms.length - 1)], freq: p.freqs[0], feePct: p.fee });
-      return `<div class="container section">
-        <a href="#/loans" class="small">← All loan products</a>
-        <div class="grid grid-2 mt-2" style="align-items:start">
-          <div>
-            <span class="eyebrow">${UI.productIcon(p.id)} ${esc(p.name)}</span>
-            <h1>${esc(p.tagline)}</h1><p class="lead muted">${esc(p.blurb)}</p>
-            <div class="kpis" style="grid-template-columns:1fr 1fr">
-              <div class="kpi"><div class="k-label">Amount range</div><div class="k-value" style="font-size:17px">${GFS.mk(p.min)} – ${GFS.mk(p.max)}</div></div>
-              <div class="kpi emerald"><div class="k-label">Interest rate</div><div class="k-value">${p.rate}%<span style="font-size:12px">/month</span></div><div class="k-sub">Declining balance</div></div>
-              <div class="kpi"><div class="k-label">Arrangement fee</div><div class="k-value">${p.fee}%</div><div class="k-sub">Deducted at disbursement</div></div>
-              <div class="kpi emerald"><div class="k-label">Terms</div><div class="k-value" style="font-size:17px">${p.terms.join(', ')} mo</div><div class="k-sub">${p.freqs.join(' · ')}</div></div>
-            </div>
-            <div class="card mt-2"><h3>What you can use it for</h3><div class="flex wrap">${p.uses.map(u => `<span class="pill">✓ ${esc(u)}</span>`).join('')}</div></div>
-            <div class="card"><h3>Eligibility requirements</h3><ul style="margin:0;padding-left:20px">${p.eligibility.map(e => `<li style="margin-bottom:6px">${esc(e)}</li>`).join('')}</ul>
-              <div class="divider"></div><div class="small muted">Guarantors required: <b>${p.guarantors}</b> · Collateral: <b>${p.collateral ? 'Required for larger amounts / secured products' : 'Not required'}</b> · Late penalty: <b>2% of overdue instalment per month</b> after a 3-day grace period.</div></div>
-            <div class="flex mt-2"><a href="#/portal/apply?product=${p.id}" class="btn btn-gold btn-lg">Apply for ${esc(p.name)} →</a><a href="#/calculator?product=${p.id}" class="btn btn-ghost btn-lg">Calculate</a></div>
-          </div>
-          <div class="card card-accent" style="position:sticky;top:90px">
-            <h3>📊 Example repayment</h3><p class="muted small">${GFS.mk(q.principal)} over ${q.termMonths} months (${q.freq})</p>
-            ${UI.table(['Item', 'Amount'], [['Loan amount', GFS.mk(q.principal)], ['Monthly rate', p.rate + '%'], ['Instalment', `<b>${GFS.mk(q.installment)}</b>`], ['Total interest', GFS.mk(q.totalInterest)], ['Arrangement fee', GFS.mk(q.fee)], ['Net disbursement', GFS.mk(q.netDisbursement)], ['Total repayable', `<b>${GFS.mk(q.totalRepayable)}</b>`]], { numCols: [1] })}
-            <a href="#/calculator?product=${p.id}" class="btn btn-emerald btn-block mt-2">Customise this quote →</a>
-            <div class="divider"></div><h3 style="font-size:14px">Also consider</h3>
-            ${P().filter(x => x.id !== p.id).slice(0, 3).map(x => `<a href="#/loans/${x.id}" class="flex small" style="padding:6px 0">${UI.productIcon(x.id)} ${esc(x.name)} <span class="muted">· ${x.rate}%/mo</span></a>`).join('')}
-          </div>
-        </div></div>`;
-    }
-  });
+  App.route('/eligibility', { title: 'Eligibility check', render: async (_, q) => { const selected = P().find(p => p.id === q.product) || P()[0]; return `${hero('Preliminary check', 'See what may fit your budget', 'This guidance uses the published affordability rules. It is not a credit decision or a guarantee of approval.')}<section class="section"><div class="container"><div class="calculator-layout"><form class="card card-accent" id="elig-form"><div class="field"><label>Loan product</label>${UI.select('productId', P().map(p => [p.id, p.name]), selected.id)}</div><div class="form-grid"><div class="field"><label>Amount (MWK)</label>${UI.input('amount', `type="number" value="${selected.min}" min="${selected.min}" max="${selected.max}" required`)}</div><div class="field"><label>Term (months)</label>${UI.select('term', selected.terms.map(t => [t, t + ' months']), selected.terms[0])}</div><div class="field"><label>Monthly income</label>${UI.input('income', 'type="number" min="0" required')}</div><div class="field"><label>Monthly expenses</label>${UI.input('expenses', 'type="number" min="0" value="0" required')}</div><div class="field"><label>Guarantors available</label>${UI.input('guarantors', 'type="number" min="0" max="3" value="0"')}</div><div class="field"><label>Verified collateral value</label>${UI.input('collateralValue', 'type="number" min="0" value="0"')}</div></div><button class="btn btn-gold btn-block" type="submit">Check eligibility ${UI.icon('arrow')}</button></form><div id="elig-result">${UI.empty(UI.icon('chart'), 'Your result will appear here', 'Enter your figures to see affordability guidance and product requirements.')}</div></div></div></section>`; }, mount: el => { const form = el.querySelector('#elig-form'); form.elements.productId.addEventListener('change', () => { const p = P().find(x => x.id === form.elements.productId.value); form.elements.amount.min = p.min; form.elements.amount.max = p.max; form.elements.amount.value = p.min; form.elements.term.innerHTML = p.terms.map(t => `<option value="${t}">${t} months</option>`).join(''); }); UI.bindForm(form, async data => { const r = await API.post('/api/eligibility', data); el.querySelector('#elig-result').innerHTML = `<div class="card eligibility-result ${r.eligible ? 'pass' : 'review'}"><span class="result-icon">${UI.icon(r.eligible ? 'check' : 'alert')}</span><h3>${r.eligible ? 'May fit the published rules' : 'A few things need attention'}</h3><p class="muted">Preliminary score ${r.score}/100 · ${esc(r.risk)} risk · estimated monthly equivalent ${GFS.mk(r.monthlyInst || 0)}</p>${r.reasons.length ? `<h4>Requirements not yet met</h4><ul>${r.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}${r.warnings.length ? `<h4>Important notes</h4><ul>${r.warnings.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}<div class="alert alert-info small mt-2">Identity, income, guarantor consent, collateral valuation and credit history still require authorised review.</div><a href="#/apply?product=${data.productId}&amount=${data.amount}&term=${data.term}" class="btn btn-emerald">Continue to application ${UI.icon('arrow')}</a></div>`; }); } });
 
-  /* ---------------- 15. CALCULATOR ---------------- */
-  App.route('/calculator', {
-    title: 'Loan Calculator', nav: '/calculator', render: async () => `
-    <div class="container section">
-      <div class="sec-head"><span class="eyebrow">Loan Calculator</span><h1>Know your repayment before you borrow</h1><p class="muted">Declining-balance interest, equal instalments. Adjust the amount, product, rate, term and frequency — the full amortisation schedule updates instantly.</p></div>
-      <div class="grid grid-2" style="align-items:start">
-        <div class="card card-accent"><h3>🧮 Your loan</h3>
-          <form id="calc-form">
-            ${UI.field('Loan type', UI.select('productId', P().map(p => [p.id, p.name]), App.query().product || 'PL'))}
-            ${UI.field('Loan amount (MWK)', UI.input('amount', 'type="number" min="10000" step="5000" value="300000" required'))}
-            <div class="form-grid">
-              ${UI.field('Term (months)', UI.select('term', P()[0].terms.map(t => [t, t + ' months']), 6))}
-              ${UI.field('Repayment frequency', UI.select('freq', [['monthly', 'Monthly'], ['fortnightly', 'Fortnightly'], ['weekly', 'Weekly'], ['daily', 'Daily']], 'monthly'))}
-              ${UI.field('Interest rate (%/month)', UI.input('rate', 'type="number" step="0.1" min="0" value="3.0"'))}
-              ${UI.field('Arrangement fee (%)', UI.input('feePct', 'type="number" step="0.1" min="0" value="2.0"'))}
-            </div>
-            ${UI.field('Disbursement date', UI.input('startDate', `type="date" value="${GFS.iso(new Date())}"`))}
-            <button class="btn btn-gold btn-block" type="submit">Calculate Repayment</button>
-          </form>
-        </div>
-        <div id="calc-results">${UI.loading('Calculating…')}</div>
-      </div>
-      <div class="card mt-3" id="calc-schedule"></div>
-    </div>`,
-    mount: async el => {
-      const form = el.querySelector('#calc-form');
-      const prodSel = form.elements.productId, termSel = form.elements.term, freqSel = form.elements.freq;
-      const syncProduct = () => {
-        const p = GFS.productById(prodSel.value);
-        termSel.innerHTML = p.terms.map(t => `<option value="${t}">${t} months</option>`).join('');
-        freqSel.innerHTML = p.freqs.map(f => `<option value="${f}">${f[0].toUpperCase() + f.slice(1)}</option>`).join('');
-        form.elements.rate.value = p.rate; form.elements.feePct.value = p.fee;
-        form.elements.amount.min = p.min; form.elements.amount.max = p.max;
-        if (Number(form.elements.amount.value) < p.min || Number(form.elements.amount.value) > p.max) form.elements.amount.value = Math.round((p.min + Math.min(p.max, p.min * 5)) / 2);
-      };
-      prodSel.addEventListener('change', () => { syncProduct(); calc(); });
-      if (App.query().product) { prodSel.value = App.query().product; }
-      syncProduct();
-      async function calc() {
-        const d = await API.post('/api/calculator', UI.formData(form));
-        const s = d.schedule;
-        el.querySelector('#calc-results').innerHTML = `
-          <div class="kpis" style="grid-template-columns:1fr 1fr">
-            <div class="kpi emerald"><div class="k-label">${s.freq} instalment</div><div class="k-value">${GFS.mk(s.installment)}</div><div class="k-sub">${s.periods} payments</div></div>
-            <div class="kpi"><div class="k-label">Total repayable</div><div class="k-value">${GFS.mk(s.totalRepayable)}</div><div class="k-sub">Principal + interest</div></div>
-            <div class="kpi"><div class="k-label">Total interest</div><div class="k-value">${GFS.mk(s.totalInterest)}</div></div>
-            <div class="kpi"><div class="k-label">Arrangement fee</div><div class="k-value">${GFS.mk(s.fee)}</div><div class="k-sub">Deducted at disbursement</div></div>
-          </div>
-          <div class="card mt-2">${UI.table(['Summary', 'Amount'], [
-            ['Net amount you receive', `<b>${GFS.mk(s.netDisbursement)}</b>`], ['Monthly equivalent', GFS.mk(s.equivalents.monthly)], ['Weekly equivalent', GFS.mk(s.equivalents.weekly)], ['Daily equivalent', GFS.mk(s.equivalents.daily)],
-            ['First repayment date', GFS.fmtDate(s.startDate ? GFS.addDays(new Date(s.startDate), s.freq === 'monthly' ? 30 : s.freq === 'fortnightly' ? 14 : s.freq === 'weekly' ? 7 : 1) : new Date())],
-            ['Repayment start', GFS.fmtDate(s.rows[0].dueDate)], ['Repayment end', GFS.fmtDate(s.endDate)], ['Total cost of credit', GFS.mk(s.totalCost)]], { numCols: [1] })}
-          <a href="#/portal/apply?product=${d.product.id}" class="btn btn-gold btn-block mt-2">Apply for this loan →</a></div>`;
-        el.querySelector('#calc-schedule').innerHTML = `<h3>📅 Amortisation schedule (${s.rows.length} ${s.freq} payments)</h3>
-          ${UI.table(['#', 'Due date', 'Opening balance', 'Instalment', 'Principal', 'Interest', 'Closing balance'], s.rows.map(r => [r.no, GFS.fmtDate(r.dueDate), GFS.mk(r.opening), GFS.mk(r.installment), GFS.mk(r.principal), GFS.mk(r.interest), GFS.mk(r.closing)]), { numCols: [2, 3, 4, 5, 6], foot: ['', 'Totals', '', GFS.mk(s.totalRepayable), GFS.mk(s.principal), GFS.mk(s.totalInterest), ''] })}`;
-      }
-      form.addEventListener('submit', e => { e.preventDefault(); calc(); });
-      form.addEventListener('change', calc);
-      await calc();
-    }
-  });
-
-  /* ---------------- 16. ELIGIBILITY ---------------- */
-  App.route('/eligibility', {
-    title: 'Loan Eligibility Checker', render: async () => `
-    <div class="container section">
-      <div class="sec-head"><span class="eyebrow">Eligibility Checker</span><h1>Check what you qualify for — instantly</h1><p class="muted">The same affordability rules our credit team uses: your instalment must fit within 40% of your net monthly income, less existing obligations. No obligation, no credit footprint.</p></div>
-      <div class="grid grid-2" style="align-items:start">
-        <div class="card card-accent"><form id="elig-form">
-          ${UI.field('Loan product', UI.select('productId', P().map(p => [p.id, p.name]), 'PL'))}
-          <div class="form-grid">
-            ${UI.field('Amount (MWK)', UI.input('amount', 'type="number" value="300000" min="10000" required'))}
-            ${UI.field('Term (months)', UI.select('term', [1, 3, 6, 12, 18, 24, 36].map(t => [t, t]), 6))}
-            ${UI.field('Gross monthly income (MWK)', UI.input('income', 'type="number" value="600000" min="0" required'))}
-            ${UI.field('Monthly expenses (MWK)', UI.input('expenses', 'type="number" value="250000" min="0"'))}
-            ${UI.field('Guarantors available', UI.select('guarantors', [0, 1, 2, 3].map(n => [n, n]), 1))}
-            ${UI.field('Collateral value (MWK, if any)', UI.input('collateralValue', 'type="number" value="0" min="0"'))}
-          </div>
-          <label class="check"><input type="checkbox" name="kycVerified" checked> I have a valid national ID, passport or driving licence</label>
-          <button class="btn btn-gold btn-block" type="submit">Check My Eligibility</button>
-        </form></div>
-        <div id="elig-results">${UI.empty('✅', 'Your result appears here', 'Fill the form and check — it takes one second.')}</div>
-      </div>
-    </div>`,
-    mount: async el => {
-      const form = el.querySelector('#elig-form');
-      async function check() {
-        const d = await API.post('/api/eligibility', UI.formData(form));
-        const ok = d.eligible;
-        el.querySelector('#elig-results').innerHTML = `
-          <div class="card" style="border-top:5px solid ${ok ? 'var(--emerald)' : 'var(--red)'}">
-            <div class="center"><div style="font-size:44px">${ok ? '🎉' : '🤔'}</div><h2 style="color:${ok ? 'var(--emerald-700)' : 'var(--red)'}">${ok ? 'You likely qualify!' : 'Not quite yet'}</h2>
-            <p class="muted">Credit score <b>${d.score}/100</b> · ${d.risk} risk · debt-to-income ${d.dti}%</p></div>
-            ${UI.progressBar(d.score)}
-            ${ok ? `<div class="alert alert-success mt-2">✓ Based on ${esc(d.product.name)}, ${GFS.mk(Number(form.elements.amount.value))} over ${form.elements.term.value} months. Your estimated instalment is <b>${GFS.mk(d.monthlyInst)}/month</b> against a capacity of ${GFS.mk(d.capacity)}.</div>` : `<div class="alert alert-error mt-2"><div><b>Why not:</b><ul style="margin:6px 0 0;padding-left:18px">${d.reasons.map(r => `<li>${esc(r)}</li>`).join('')}</ul></div></div>`}
-            ${d.warnings.length ? `<div class="alert alert-warn"><div><b>Notes:</b><ul style="margin:6px 0 0;padding-left:18px">${d.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div></div>` : ''}
-            ${d.quote ? UI.table(['Quote', 'Amount'], [['Instalment', GFS.mk(d.quote.installment)], ['Total interest', GFS.mk(d.quote.totalInterest)], ['Arrangement fee', GFS.mk(d.quote.fee)], ['Total repayable', GFS.mk(d.quote.totalRepayable)]], { numCols: [1] }) : ''}
-            <a href="#/portal/apply?product=${d.product.id}" class="btn ${ok ? 'btn-gold' : 'btn-ghost'} btn-block mt-2">${ok ? 'Start my application →' : 'Adjust and apply anyway →'}</a>
-            <p class="tiny muted center mt-1">Indicative only. Final approval depends on verified documents and credit checks.</p>
-          </div>`;
-      }
-      form.addEventListener('submit', e => { e.preventDefault(); check(); });
-    }
-  });
-
-  /* ---------------- 17. HOW IT WORKS ---------------- */
-  App.route('/how-it-works', { title: 'How It Works', nav: '/how-it-works', render: async () => `
-    <div class="container section">
-      <div class="sec-head"><span class="eyebrow">How It Works</span><h1>Your journey from application to settlement</h1></div>
-      <div class="grid grid-2">
-        ${[['📝', '1. Register & verify', 'Create your account with your email and Malawi mobile number. Verify both with one-time codes, then complete your profile and upload your ID and proof of income. Documents are encrypted and only you can see them.'],
-          ['🧮', '2. Plan with the tools', 'Use the calculator and eligibility checker to choose a product, amount and term that fit your budget. Smart recommendations suggest the best product for your goal.'],
-          ['📋', '3. Apply online', 'Complete the application: personal and employment details, income, guarantor, collateral (if needed), and your preferred disbursement account. Accept the terms and submit — you get a GLS-APP reference instantly.'],
-          ['🔍', '4. Verification & assessment', 'Your identity, documents, guarantor and collateral are verified, and affordability is assessed automatically (instalment ≤ 40% of net income). Track every stage in your portal.'],
-          ['✅', '5. Decision & offer', 'Approved applications receive a full offer: amount, rate, fee, instalment, total repayable and schedule. Rejections always include the reason, so you can adjust and re-apply.'],
-          ['✍️', '6. Sign electronically', 'Review the 13-clause loan agreement and sign with a drawn or typed electronic signature. Your signed agreement is stored and downloadable as a PDF.'],
-          ['💰', '7. Disbursement', 'The net amount (principal less the arrangement fee) is sent to your TNM Mpamba, Airtel Money or bank account. You receive a disbursement reference and confirmation.'],
-          ['💳', '8. Repay & track', 'Pay from the portal by mobile money, bank or cash. Verified payments update your balance instantly, issue a unique receipt, and move your repayment schedule forward.'],
-          ['📑', '9. Statements & records', 'Download loan statements, transaction histories, receipts and settlement statements as PDFs anytime. Everything is kept in one central record.'],
-          ['🎉', '10. Settle & grow', 'Settle early anytime with future interest waived, release your collateral, and request a top-up, renewal or your next loan.']].map(([i, t, b]) => `<div class="card"><div class="flex"><div style="font-size:26px">${i}</div><h3 class="mb-0">${t}</h3></div><p class="muted small mt-1 mb-0">${b}</p></div>`).join('')}
-      </div>
-      <div class="cta-band mt-3"><div><h2>Start step one now</h2><p>Registration takes about two minutes.</p></div><a href="#/register" class="btn btn-gold btn-lg">Create Account →</a></div>
-    </div>` });
-
-  /* ---------------- 18. REQUIREMENTS ---------------- */
-  App.route('/requirements', { title: 'Loan Requirements', render: async () => `
-    <div class="container section">
-      <div class="sec-head"><span class="eyebrow">Loan Requirements</span><h1>What you need to apply</h1></div>
-      <div class="grid grid-2">
-        <div class="card card-accent"><h3>📄 Everyone needs</h3><ul>${['Valid national ID, passport or driving licence', 'Active Malawi mobile number (TNM or Airtel)', 'Proof of income — latest payslip or 3 months bank/mobile money statements', 'Proof of residence (utility bill or letter from local authority)', 'A completed profile in the customer portal', 'Verified phone and email'].map(x => `<li style="margin-bottom:7px">${x}</li>`).join('')}</ul></div>
-        <div class="card"><h3>🤝 Guarantors & security</h3><ul>${['Most products: one guarantor with a valid ID and phone, who consents in the portal', 'Group loans: two member guarantors per borrower', 'Business loans above MK 2,000,000: collateral valued at ≥ 80% of the amount', 'Asset financing: the financed asset is the security', 'Mortgages: titled property, professional valuation and 30% deposit/equity', 'Salary advance: no guarantor — employer confirmation instead'].map(x => `<li style="margin-bottom:7px">${x}</li>`).join('')}</ul></div>
-      </div>
-      <div class="card mt-2"><h3>📦 Product-specific documents</h3>
-      ${UI.table(['Product', 'Extra documents'], [['Business Loans', 'Business registration, 6 months trading statements, stock/asset quotation'], ['Agricultural Loans', 'Season plan and budget, land access proof, extension-worker reference'], ['Education Loans', 'Admission/enrolment letter, fee structure from the institution'], ['Medical Loans', 'Medical report or quotation from a recognised facility'], ['Asset Financing', 'Supplier quotation/invoice, insurance where relevant'], ['Mortgage Loans', 'Title deed or registered sale agreement, valuation report, deposit proof'], ['Salary Advance', 'Latest payslip, employer confirmation letter, salary account proof'], ['Group Loans', 'Group constitution, savings history, joint liability agreement']])}</div>
-      <div class="alert alert-info mt-2">🔐 Upload everything securely in <a href="#/portal/documents">Profile → Documents</a>. Files are encrypted at rest and visible only to you and the verification team.</div>
-    </div>` });
-
-  /* ---------------- 19. RATES & FEES ---------------- */
-  App.route('/rates', { title: 'Interest Rates & Fees', render: async () => `
-    <div class="container section">
-      <div class="sec-head"><span class="eyebrow">Interest Rates & Fees</span><h1>Transparent pricing — every kwacha explained</h1><p class="muted">Interest is charged monthly on the <b>declining balance</b>: as you repay principal, your interest falls. The arrangement fee is a one-off percentage deducted from the disbursement.</p></div>
-      <div class="table-wrap">${UI.table(['Product', 'Rate / month', 'Arrangement fee', 'Late penalty', 'Early settlement'], P().map(p => [`<b>${UI.productIcon(p.id)} ${esc(p.name)}</b>`, p.rate + '%', p.fee + '% of principal', '2% of overdue instalment / month', 'Future interest waived']))}</div>
-      <div class="grid grid-3 mt-3">
-        <div class="card"><h3>📉 How declining balance works</h3><p class="small muted">Each instalment covers that period's interest first, then reduces your principal. The next period's interest is computed on the smaller balance — so you pay less interest over time than a flat-rate loan.</p></div>
-        <div class="card"><h3>🧾 The arrangement fee</h3><p class="small muted">A one-off fee of ${Math.min(...P().map(p => p.fee))}%–${Math.max(...P().map(p => p.fee))}% of the principal, deducted when the loan is disbursed. Example: MK 1,000,000 at 2% → you receive MK 980,000 and repay MK 1,000,000 plus interest.</p></div>
-        <div class="card"><h3>⏰ Late payments</h3><p class="small muted">A 3-day grace period applies. After that, 2% of the overdue instalment is added per month (or part month) overdue. Contact us early if you are struggling — restructuring is available.</p></div>
-      </div>
-      <div class="alert alert-success mt-2">✓ No application fees. No monthly account fees. No early-settlement penalties. What you see in the calculator is what you pay.</div>
-    </div>` });
-
-  /* ---------------- 20. REPAYMENT METHODS ---------------- */
-  App.route('/repayment-methods', { title: 'Repayment Methods', render: async () => `
-    <div class="container section">
-      <div class="sec-head"><span class="eyebrow">Repayment Methods</span><h1>Pay the way that suits you</h1><p class="muted">Every verified payment updates your loan balance immediately and issues a unique receipt you can download.</p></div>
-      <div class="grid grid-2">${GFS.PAYMENT_METHODS.map(m => `<div class="card" style="border-left:5px solid ${m.colour}"><div class="flex"><div style="font-size:28px">${m.icon}</div><h3 class="mb-0">${esc(m.name)}</h3></div><p class="muted small mt-1">${esc(m.instructions)}</p><div class="tiny muted">Merchant / account: <span class="mono">${esc(m.merchant)}</span></div></div>`).join('')}</div>
-      <div class="card mt-2"><h3>🔁 How payments are applied</h3><p class="small muted mb-0">Payments are allocated in this order: <b>penalties → fees → interest → principal</b>. Extra payments become advance credit and reduce future interest. Partial, advance, daily, weekly, fortnightly and monthly payments are all supported.</p></div>
-      <div class="cta-band mt-3"><div><h2>Repay from your portal</h2><p>Sign in, open your loan, and pay in under a minute.</p></div><a href="#/portal/loans" class="btn btn-gold btn-lg">Go to My Loans →</a></div>
-    </div>` });
-
-  /* ---------------- 21. FAQ ---------------- */
-  App.route('/faq', { title: 'FAQs', render: async () => `
-    <div class="container section" style="max-width:860px">
-      <div class="sec-head"><span class="eyebrow">FAQs</span><h1>Frequently asked questions</h1></div>
-      ${GFS.FAQS.map(f => `<details class="faq-item"><summary>${esc(f.q)}</summary><div class="faq-a">${esc(f.a)}</div></details>`).join('')}
-      <div class="card mt-3 center"><h3>Still have a question?</h3><p class="muted small">Our AI assistant answers instantly, and human agents are one ticket away.</p><div class="flex" style="justify-content:center"><a href="#/portal/chat" class="btn btn-emerald">💬 Live Chat</a><a href="#/contact" class="btn btn-ghost">Contact Us</a></div></div>
-    </div>` });
-
-  /* ---------------- 22. CONTACT ---------------- */
-  App.route('/contact', { title: 'Contact Us', nav: '/contact', render: async () => `
-    <div class="container section">
-      <div class="sec-head"><span class="eyebrow">Contact Us</span><h1>We are here to help</h1></div>
-      <div class="grid grid-2" style="align-items:start">
-        <div>
-          <div class="card"><h3>📍 Head office</h3><p class="mb-1">${esc(C().address)}</p><p class="mb-1">📞 <a href="tel:${C().phone.replace(/\s/g, '')}">${esc(C().phone)}</a></p><p class="mb-1">💬 WhatsApp: <a href="https://wa.me/${C().whatsapp.replace(/[^0-9]/g, '')}" target="_blank" rel="noopener">${esc(C().whatsapp)}</a></p><p class="mb-1">✉️ <a href="mailto:${C().email}">${esc(C().email)}</a></p><p class="mb-0">🕘 Mon–Fri 08:00–17:00 · Sat 08:00–12:00</p></div>
-          <div class="card"><h3>🏢 Our branches</h3>${GFS.BRANCHES.map(b => `<div class="flex-between" style="padding:8px 0;border-bottom:1px solid var(--line-2)"><div><b>${esc(b.city)}</b><div class="tiny muted">${esc(b.address)}</div></div><span class="tiny muted nowrap">${esc(b.phone)}</span></div>`).join('')}<a href="#/branches" class="btn btn-ghost btn-sm mt-2">Branch details →</a></div>
-        </div>
-        <div class="card card-accent"><h3>✉️ Send us a message</h3>
-          ${App.user ? `<form id="contact-form">${UI.field('Subject', UI.input('subject', 'required maxlength="150" placeholder="How can we help?"'))}${UI.field('Category', UI.select('category', [['general', 'General enquiry'], ['complaint', 'Complaint'], ['payment', 'Payment issue'], ['application', 'Application help'], ['account', 'Account'], ['feedback', 'Feedback']], 'general'))}${UI.field('Message', '<textarea name="message" required maxlength="4000" placeholder="Tell us more…"></textarea>')}<button class="btn btn-gold btn-block" type="submit">Send Message</button></form>`
-          : `<p class="muted small">Sign in to send a tracked message, or use the contact details on the left.</p><a href="#/login" class="btn btn-emerald btn-block">Sign In to Message</a><div class="divider"></div><p class="small muted mb-0">Prefer email? Write to <a href="mailto:${C().support}">${C().support}</a> — we reply within one working day.</p>`}
-        </div>
-      </div>
-    </div>`,
-    mount: async el => {
-      const f = el.querySelector('#contact-form');
-      if (f) UI.bindForm(f, async data => { const d = await API.post('/api/tickets', data); UI.toast(`Message sent — ticket ${d.ticket.ref} created. We will reply in your portal.`); App.go('/portal/support'); });
-    }
-  });
-
-  /* ---------------- 23. TESTIMONIALS ---------------- */
-  App.route('/testimonials', { title: 'Customer Testimonials', render: async () => `
-    <div class="container section">
-      <div class="sec-head"><span class="eyebrow">Testimonials</span><h1>Stories from our customers</h1><p class="muted">Real borrowing journeys from across Malawi.</p></div>
-      <div class="grid grid-3">${GFS.TESTIMONIALS.map(t => `<div class="testimonial"><div class="stars">${'★'.repeat(t.rating)}${'☆'.repeat(5 - t.rating)}</div><blockquote>“${esc(t.text)}”</blockquote><div class="t-who">${esc(t.name)} · ${esc(t.place)}</div><div class="tiny muted">${esc(t.product)}</div></div>`).join('')}</div>
-      <div class="cta-band mt-3"><div><h2>Write your own success story</h2><p>Join thousands of Malawians growing with Golden.</p></div><a href="#/register" class="btn btn-gold btn-lg">Get Started →</a></div>
-    </div>` });
-
-  /* ---------------- 24. BRANCHES ---------------- */
-  App.route('/branches', { title: 'Branch Locations', render: async () => `
-    <div class="container section">
-      <div class="sec-head"><span class="eyebrow">Branch Locations</span><h1>Visit us nationwide</h1></div>
-      <div class="grid grid-2">${GFS.BRANCHES.map(b => `<div class="card branch-card"><div class="flex-between"><h3 class="mb-0">📍 ${esc(b.city)}</h3><span class="badge ${b.type === 'Head Office' ? 'badge-gold' : 'badge-green'}">${esc(b.type)}</span></div><p class="muted small mt-1 mb-1">${esc(b.address)}</p><p class="small mb-1">📞 ${esc(b.phone)}</p><p class="tiny muted mb-0">🕘 ${esc(b.hours)}</p></div>`).join('')}</div>
-      <div class="alert alert-info mt-2">🅿️ All branches offer cash repayment counters, document drop-off and in-person application help. Bring your national ID.</div>
-    </div>` });
-
-  /* ---------------- 25. ANNOUNCEMENTS ---------------- */
-  App.route('/announcements', { title: 'Company Announcements', render: async () => {
-    const d = await API.get('/api/announcements');
-    return `<div class="container section" style="max-width:860px">
-      <div class="sec-head"><span class="eyebrow">Announcements</span><h1>News from Golden Financial Services</h1></div>
-      ${d.announcements.map(a => `<div class="card ${a.pinned ? 'card-accent' : ''}"><div class="flex-between"><h3 class="mb-0">${a.pinned ? '📌 ' : ''}${esc(a.title)}</h3><span class="badge badge-grey">${esc(a.category)}</span></div><p class="muted small mt-1">${esc(a.body)}</p><div class="tiny muted">${GFS.fmtDateTime(a.published_at)}</div></div>`).join('') || UI.empty('📢', 'No announcements yet')}
-    </div>`; } });
-
-  /* ---------------- 26. TERMS ---------------- */
-  App.route('/terms', { title: 'Terms & Conditions', render: async () => `
-    <div class="container section" style="max-width:860px">
-      <div class="sec-head"><span class="eyebrow">Legal</span><h1>Terms & Conditions</h1><p class="muted small">Last updated: ${GFS.fmtDate(new Date())}</p></div>
-      <div class="card">
-        ${[['1. About these terms', 'These terms govern your use of the Golden Financial Services website and customer portal, operated by Golden Financial Services Limited, Lilongwe, Malawi. By registering you accept them.'],
-          ['2. Your account', 'You must be 18+ and provide true, current information. You are responsible for keeping your password and OTP codes confidential. Notify us immediately of any unauthorised use.'],
-          ['3. Loan agreements', 'Each loan is governed by its own offer and 13-clause loan agreement, which you accept electronically before disbursement. The agreement prevails for that loan.'],
-          ['4. Interest and fees', 'Interest is charged on the declining balance at the product rate shown in your offer. The arrangement fee is deducted at disbursement. Late penalties of 2% of the overdue instalment apply per month after a 3-day grace period.'],
-          ['5. Repayment', 'You must repay by the schedule in your agreement. Payments are allocated to penalties, fees, interest then principal. Early settlement is allowed at any time with future interest waived.'],
-          ['6. Default', 'Missed payments, false information or disposal of security may lead to demand for the full balance, enforcement of security and credit-bureau reporting, after written notice.'],
-          ['7. System settings', 'Products, rates, fees and other system settings are managed by the Golden Loan Services back-office. Customer accounts cannot change them.'],
-          ['8. Acceptable use', 'Do not misuse the portal, attempt unauthorised access, upload unlawful content, or interfere with the service.'],
-          ['9. Liability', 'We provide the service with reasonable care. To the extent permitted by law, our liability is limited to direct losses caused by our negligence.'],
-          ['10. Changes', 'We may update these terms with notice in the portal. Existing loan agreements are not varied without your consent.'],
-          ['11. Governing law', 'These terms are governed by the laws of the Republic of Malawi. Disputes are subject to the courts of Malawi, and complaints may be referred to the Reserve Bank of Malawi.']].map(([t, b]) => `<h3 style="font-size:15px">${t}</h3><p class="small muted">${b}</p>`).join('')}
-      </div>
-    </div>` });
-
-  /* ---------------- 27. PRIVACY ---------------- */
-  App.route('/privacy', { title: 'Privacy Policy', render: async () => `
-    <div class="container section" style="max-width:860px">
-      <div class="sec-head"><span class="eyebrow">Legal</span><h1>Privacy Policy</h1><p class="muted small">Your data, protected. Last updated: ${GFS.fmtDate(new Date())}</p></div>
-      <div class="card">
-        ${[['What we collect', 'Identity and contact details, employment and income information, guarantor and collateral details, loan and payment records, documents you upload, and technical logs (IP, device, activity) for security.'],
-          ['Why we collect it', 'To assess and service your loans, verify your identity (KYC), process payments, prevent fraud, meet legal obligations, and communicate with you about your account.'],
-          ['How we protect it', 'Passwords are hashed with scrypt. Documents and national ID numbers are encrypted at rest with AES-256-GCM. Sessions expire automatically. Access is role-based — you can only ever see your own records. Every action is written to an audit trail.'],
-          ['Who can see it', 'Only you and authorised Golden Financial Services staff (and the linked back-office system) can access your records. We never sell your data. We may share with licensed credit reference bureaus and regulators as the law requires.'],
-          ['Your rights', 'Access, correct or export your data anytime from Profile → Settings → Export my data. Request deletion where the law allows (loan records must be retained for regulatory periods). Opt out of marketing messages in Settings.'],
-          ['Cookies & storage', 'We use a session cookie to keep you signed in and local storage for your preferences. In GitHub Pages demo mode, data stays on your device only.'],
-          ['Retention', 'Loan and transaction records are retained for the period required by Malawian financial regulation (typically 7 years after closure).'],
-          ['Contact', 'Questions or complaints about privacy: ' + C().email + ' or ' + C().address + '.']].map(([t, b]) => `<h3 style="font-size:15px">${t}</h3><p class="small muted">${b}</p>`).join('')}
-      </div>
-    </div>` });
-
-  /* ---------------- 28. APPLY (public entry) ---------------- */
-  App.route('/apply', { title: 'Apply for a Loan', render: async () => {
-    if (App.user) { App.go('/portal/apply'); return ''; }
-    return `<div class="container section">
-      <div class="sec-head center" style="margin-inline:auto"><span class="eyebrow">Online Loan Application</span><h1>Apply for a loan in minutes</h1><p class="muted">Create your free account, then complete the guided application. You will get a reference number and can track every stage.</p></div>
-      <div class="grid grid-3">
-        ${[['1', 'Create account', 'Register with your email and mobile number, verify with one-time codes.'], ['2', 'Complete & apply', 'Fill your profile, upload your ID, choose a product and submit.'], ['3', 'Sign & receive', 'Accept your offer electronically and get funds via mobile money or bank.']].map(([n, t, b]) => `<div class="card center"><div class="s-no" style="margin:0 auto 12px">${n}</div><h3>${t}</h3><p class="muted small mb-0">${b}</p></div>`).join('')}
-      </div>
-      <div class="center mt-3 flex" style="justify-content:center"><a href="#/register" class="btn btn-gold btn-lg">Create Account & Apply →</a><a href="#/login" class="btn btn-ghost btn-lg">I already have an account</a></div>
-      <div class="alert alert-info mt-3" style="max-width:720px;margin-inline:auto">💡 Not sure yet? <a href="#/eligibility">Check your eligibility</a> or <a href="#/calculator">calculate a repayment</a> first — no account needed.</div>
-    </div>`; } });
+  App.route('/how-it-works', { title: 'Application process', render: async () => `${hero('Application process', 'A clear path from application to repayment', 'Track each stage in your portal and keep every reference, document and decision together.')}<section class="section"><div class="container"><div class="timeline-page">${[['Create your account', 'Register, verify your phone and email, and secure your account with two-factor authentication.'], ['Complete your profile', 'Add personal, address, employment or business, income and next-of-kin details.'], ['Prepare documents', 'Upload identity and income evidence, add guarantors and describe any collateral.'], ['Submit and track', 'Choose a product, amount and term. Receive an application reference and follow the review timeline.'], ['Review the decision', 'See approval conditions or reasons for refusal. Upload missing documents or adjust your request.'], ['Sign an approved offer', 'Read the current terms, download the agreement and provide your electronic signature.'], ['Follow disbursement', 'Live funds move only after an authorised provider-confirmed disbursement record.'], ['Repay and keep records', 'Make verified payments, download receipts and statements, and request settlement or changes.']].map(([t, b], i) => `<div class="timeline-step"><span>${i + 1}</span><div><h3>${t}</h3><p>${b}</p></div></div>`).join('')}</div><div class="center mt-3"><a href="#/apply" class="btn btn-gold btn-lg">Start an application</a></div></div></section>` });
+  App.route('/requirements', { title: 'Loan requirements', render: async () => `${hero('Document checklist', 'Get your application ready', 'Requirements vary by product. Upload clear, current documents; storage alone does not verify identity.')}<section class="section"><div class="container"><div class="grid grid-2"><article class="card"><h3>Everyone prepares</h3><ul class="check-list">${['Valid national ID, passport or driving licence', 'Verified phone number and email address', 'Proof of income or repayment source', 'Personal, address and employment/business details', 'Next-of-kin contact details'].map(x => `<li>${UI.icon('check')}<span>${x}</span></li>`).join('')}</ul></article><article class="card"><h3>Depending on the product</h3><ul class="check-list">${['Guarantor details, consent evidence and identity documents', 'Collateral ownership documents and professional valuation', 'Business registration and trading statements', 'Admission letter, medical report or supplier invoice', 'Group constitution and member guarantees'].map(x => `<li>${UI.icon('file')}<span>${x}</span></li>`).join('')}</ul></article></div><div class="product-grid mt-3">${P().map(p => `<article class="card"><div class="flex"><span class="mini-product-icon">${UI.productIcon(p.id)}</span><h3 class="mb-0">${esc(p.name)}</h3></div><ul class="small muted mt-2">${p.eligibility.map(x => `<li>${esc(x)}</li>`).join('')}</ul><a href="#/loans/${p.id}" class="text-link">Product details ${UI.icon('arrow')}</a></article>`).join('')}</div></div></section>` });
+  App.route('/rates', { title: 'Rates & fees', render: async () => { const r = App.config?.rules || GFS.RULES; return `${hero('Published pricing', 'Rates and fees, without the guesswork', 'Monthly rates use a declining-balance basis. Actual interest accrues daily on unpaid principal; early repayment reduces future interest.')}<section class="section"><div class="container"><div class="card">${UI.table(['Product', 'Monthly rate', 'Arrangement fee', 'Amount range', 'Terms'], P().map(p => [`<a href="#/loans/${p.id}">${esc(p.name)}</a>`, `${p.rate}%`, `${p.fee}% deducted at disbursement`, `${GFS.mk(p.min)}–${GFS.mk(p.max)}`, p.terms.join(', ') + ' months']))}</div><div class="grid grid-3 mt-3"><article class="card"><h3>Late payments</h3><p>${r.latePenaltyPct}% of the unpaid instalment after a ${r.graceDays}-day grace period, according to the published rules.</p></article><article class="card"><h3>Early settlement</h3><p>No early-settlement penalty. Pay principal, interest accrued to today, fees and penalties; future unaccrued interest is waived.</p></article><article class="card"><h3>Payment allocation</h3><p>Verified payments are allocated to penalties, fees, interest and then principal. Every posting is recorded.</p></article></div><div class="alert alert-info mt-3">${UI.icon('alert')}<div>System pricing is managed by the back-office and is read-only for customers. Calculator figures are estimates until an offer is issued and signed.</div></div></div></section>`; } });
+  App.route('/repayment-methods', { title: 'Repayment methods', render: async () => { const d = await API.get('/api/payment-methods'); return `${hero('Repayments', 'Choose how you repay', 'Every payment starts with a unique reference. Balances change only after verification or reconciliation.')}<section class="section"><div class="container"><div class="grid grid-2">${d.methods.map(m => `<article class="card payment-method-card"><span class="service-icon">${UI.icon(m.type === 'mobile' ? 'phone' : m.type === 'bank' ? 'home' : 'wallet')}</span><div><h3>${esc(m.name)}</h3><p>${esc(m.instructions || 'Use your unique payment reference and keep the provider receipt.')}</p><span class="badge ${m.available ? 'badge-green' : 'badge-amber'}">${m.mode === 'sandbox' ? 'Sandbox available' : m.available ? m.mode === 'gateway' ? 'Gateway configured' : 'Reconciliation' : 'Awaiting provider setup'}</span></div></article>`).join('')}</div><div class="alert alert-warn mt-3">${UI.icon('shield')}<div>Never share your mobile-money PIN or OTP with anyone. In sandbox mode, payment prompts and confirmations are simulated. Live mobile-money collection requires a configured merchant gateway and signed callbacks.</div></div><div class="center mt-3"><a href="#/portal/payments" class="btn btn-gold">Make a payment ${UI.icon('arrow')}</a></div></div></section>`; } });
+  App.route('/faq', { title: 'FAQs', render: async () => `${hero('Help centre', 'Questions, answered clearly', 'Search common questions about applying, repaying, documents and security.')}<section class="section"><div class="container narrow"><label class="search-field">${UI.icon('search')}<input id="faq-search" type="search" placeholder="Search FAQs…" aria-label="Search FAQs"></label><div id="faq-list" class="faq-list mt-2">${GFS.FAQS.map((f, i) => `<details class="faq-item" ${i === 0 ? 'open' : ''}><summary>${esc(f.q)}${UI.icon('chevron')}</summary><div>${esc(f.a)}</div></details>`).join('')}</div><div class="card center mt-3"><h3>Still need help?</h3><p class="muted">Use the assistant or open a tracked support ticket.</p><a href="#/contact" class="btn btn-emerald">Contact support</a></div></div></section>`, mount: el => { const input = el.querySelector('#faq-search'); input.addEventListener('input', () => { const q = input.value.toLowerCase(); el.querySelectorAll('.faq-item').forEach((item, i) => { item.hidden = !`${GFS.FAQS[i].q} ${GFS.FAQS[i].a}`.toLowerCase().includes(q); }); }); } });
+  App.route('/contact', { title: 'Contact us', nav: '/contact', render: async () => { const c = C(); return `${hero('Contact', 'Let’s talk about your next step', 'Reach a branch, ask the assistant or open a support ticket from your portal.')}<section class="section"><div class="container"><div class="contact-layout"><div class="contact-cards">${[['phone', 'Call us', c.phone, `tel:${c.phone}`], ['mail', 'Email us', c.email, `mailto:${c.email}`], ['pin', 'Head office', c.address, '#/branches'], ['headset', 'Customer support', c.support || c.email, `mailto:${c.support || c.email}`]].map(([i, t, v, h]) => `<a class="card contact-card" href="${esc(h)}"><span class="service-icon">${UI.icon(i)}</span><div><h3>${t}</h3><p>${esc(v)}</p></div>${UI.icon('arrow')}</a>`).join('')}</div><div class="card card-accent"><h3>${App.user ? 'Send a support message' : 'Get personalised help'}</h3>${App.user ? `<form id="contact-form"><div class="field"><label>Subject</label>${UI.input('subject', 'required maxlength="150"')}</div><div class="field"><label>Category</label>${UI.select('category', [['general', 'General question'], ['payment', 'Payment'], ['application', 'Application'], ['complaint', 'Complaint'], ['account', 'Account']])}</div><div class="field"><label>Message</label><textarea name="message" required minlength="10" maxlength="5000"></textarea></div><button class="btn btn-gold btn-block" type="submit">Open support ticket</button></form>` : `<p class="muted">Sign in to send a tracked message, or use the phone and email details shown here.</p><a href="#/login?next=${encodeURIComponent('/contact')}" class="btn btn-emerald">Sign in to get help</a><a href="#/register" class="btn btn-ghost mt-1">Create an account</a>`}<div class="alert alert-info small mt-2">${UI.icon('shield')} Never send passwords, OTPs or mobile-money PINs in a message.</div></div></div></div></section>`; }, mount: el => { const form = el.querySelector('#contact-form'); if (form) UI.bindForm(form, async data => { const r = await API.post('/api/tickets', data); UI.toast(`Ticket ${r.ticket.ref} opened.`); App.go('/portal/support'); }); } });
+  App.route('/testimonials', { title: 'Customer stories', render: async () => `${hero('Customer stories', 'Experiences that illustrate the journey', 'The stories below are sample content for this website build. Verified customer testimonials should replace them only with explicit consent.')}<section class="section"><div class="container"><div class="alert alert-warn">${UI.icon('alert')}<div><b>Illustrative content.</b> These are not verified customer endorsements.</div></div><div class="grid grid-3 mt-2">${GFS.TESTIMONIALS.map(t => `<article class="testimonial"><div class="stars" aria-label="${t.rating} out of 5 stars">${'★'.repeat(t.rating)}${'☆'.repeat(5 - t.rating)}</div><blockquote>“${esc(t.text)}”</blockquote><div class="t-who">${esc(t.name)} · ${esc(t.place)}</div><div class="tiny muted">${esc(t.product)} · sample story</div></article>`).join('')}</div></div></section>` });
+  App.route('/branches', { title: 'Branches', render: async () => { const branches = App.config?.branches || GFS.BRANCHES; return `${hero('Branch network', 'Find your nearest Golden branch', 'Confirm opening hours and payment details with the branch before travelling.')}<section class="section"><div class="container"><label class="search-field">${UI.icon('search')}<input id="branch-search" type="search" placeholder="Search by city…" aria-label="Search branches"></label><div class="grid grid-2 mt-2" id="branch-grid">${branches.map(b => `<article class="card branch-card" data-city="${esc(b.city.toLowerCase())}"><div class="flex-between"><span class="service-icon">${UI.icon('pin')}</span><span class="pill">${esc(b.type || 'Branch')}</span></div><h3>${esc(b.city)}</h3><p>${esc(b.address)}</p><div class="branch-meta"><span>${UI.icon('phone')} <a href="tel:${esc(b.phone)}">${esc(b.phone)}</a></span><span>${UI.icon('clock')} ${esc(b.hours)}</span></div></article>`).join('')}</div></div></section>`; }, mount: el => { el.querySelector('#branch-search').addEventListener('input', e => { const q = e.target.value.toLowerCase(); el.querySelectorAll('.branch-card').forEach(c => c.hidden = !c.dataset.city.includes(q) && !c.textContent.toLowerCase().includes(q)); }); } });
+  App.route('/announcements', { title: 'Announcements', render: async () => { const d = await API.get('/api/announcements'); return `${hero('News & notices', 'Announcements', 'Service updates, security reminders and product information.')}<section class="section"><div class="container narrow">${d.announcements.length ? d.announcements.map(a => `<article class="card announcement-card ${a.pinned ? 'pinned' : ''}"><div class="flex-between"><span class="badge badge-gold">${esc(a.category)}</span><span class="small muted">${GFS.fmtDate(a.published_at)}</span></div><h3>${esc(a.title)}</h3><p class="mb-0">${esc(a.body)}</p></article>`).join('') : UI.empty(UI.icon('bell'), 'No announcements yet', 'Check back for service updates.')}</div></section>`; } });
+  App.route('/terms', { title: 'Terms & conditions', render: async () => `${hero('Legal', 'Terms & conditions', 'Please read these website terms together with any loan agreement you sign.')}<section class="section"><div class="container narrow legal-copy"><article class="card">${GFS.AGREEMENT_CLAUSES.map(c => `<h3>${esc(c.t)}</h3><p>${esc(c.b)}</p>`).join('')}<h3>Website and sandbox use</h3><p>GitHub Pages and explicitly enabled sandbox environments are demonstrations. They do not move money, send real provider messages or perform external identity checks. Live services require a deployed backend and configured providers.</p><h3>Company verification</h3><p>Before production use, the operator must confirm legal entity details, licensing, complaints procedures and approved product terms. This software does not itself grant a lending licence.</p></article></div></section>` });
+  App.route('/privacy', { title: 'Privacy policy', render: async () => `${hero('Legal', 'Privacy & data protection', 'How the customer portal handles your information in backend and sandbox modes.')}<section class="section"><div class="container narrow legal-copy"><article class="card">${[['What we collect', 'Account and contact details, profile and income information, application records, documents you upload, payment references, support messages and security activity.'], ['How backend data is protected', 'Passwords are hashed with scrypt. Documents and identity fields are encrypted at rest. Customer APIs enforce own-record access. Financial postings and audit records are append-only.'], ['Sandbox storage', 'The static GitHub Pages sandbox stores sample workflow data in your browser. It hashes sandbox passwords and discards uploaded file contents. Do not enter real sensitive information into a sandbox.'], ['Payments and messages', 'Live mobile-money verification requires signed provider callbacks. SMS and email are queued only when a gateway is configured; delivery status is shown separately from in-app history.'], ['Your choices', 'You can update your profile, notification preferences, security settings and export your own records. Verified financial records are retained for audit and legal obligations.'], ['Administration link', 'The separate Golden Loan Services public repository is a static prototype. A link or shared browser origin is not a secure shared database.'], ['Contact', `For privacy questions contact ${C().email}. The production operator must publish its verified legal entity, retention schedule and applicable data-protection contact before launch.`]].map(([t, b]) => `<h3>${esc(t)}</h3><p>${esc(b)}</p>`).join('')}</article></div></section>` });
+  App.route('/apply', { title: 'Apply for a loan', render: async (_, q) => { if (App.user) { App.go('/portal/apply' + (q.product ? `?product=${q.product}${q.amount ? `&amount=${q.amount}` : ''}${q.term ? `&term=${q.term}` : ''}` : '')); return UI.loading(); } const p = P().find(x => x.id === q.product); return `${hero('Start your application', p ? `Apply for ${esc(p.name)}` : 'Apply for a loan', 'Create a secure account or sign in to complete the multi-step application, upload documents and track your decision.')}<section class="section"><div class="container"><div class="grid grid-3">${[['1', 'Create or sign in', 'Verify your phone and email to protect your account.'], ['2', 'Complete the application', 'Choose amount and term, add details, guarantors and documents.'], ['3', 'Track the decision', 'Review status, reasons, offers and next steps in your portal.']].map(([n, t, b]) => `<article class="card process-card"><span class="process-number">${n}</span><h3>${t}</h3><p>${b}</p></article>`).join('')}</div><div class="card center mt-3"><h3>${p ? esc(p.name) : 'Choose from ten loan products'}</h3><p class="muted">${p ? `${GFS.mk(p.min)}–${GFS.mk(p.max)} · ${p.rate}% monthly declining rate · ${p.fee}% arrangement fee.` : 'You can compare products before starting.'}</p><div class="flex wrap" style="justify-content:center"><a href="#/register?next=${encodeURIComponent('/portal/apply' + (q.product ? `?product=${q.product}` : ''))}" class="btn btn-gold btn-lg">Create account & apply</a><a href="#/login?next=${encodeURIComponent('/portal/apply' + (q.product ? `?product=${q.product}` : ''))}" class="btn btn-ghost btn-lg">Sign in to continue</a></div></div></div></section>`; } });
 })();

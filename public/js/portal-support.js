@@ -7,9 +7,9 @@
 
   /* ---------------- LIVE CHAT ---------------- */
   App.route('/portal/chat', {
-    title: 'Live Chat', layout: 'portal', auth: true, render: async () => {
+    title: 'Assistant', layout: 'portal', auth: true, render: async () => {
       const d = await API.get('/api/chat');
-      return head('Live Chat Support', 'AI assistant for instant answers · human agents one ticket away', '<a href="#/portal/support" class="btn btn-ghost btn-sm">🎧 Open a ticket</a>') + `
+      return head('Golden Assistant', 'Automated guidance from your records · tracked human support when you need it', '<a href="#/portal/support" class="btn btn-ghost btn-sm">🎧 Open a ticket</a>') + `
       <div class="grid grid-2" style="align-items:start">
         <div class="card" style="padding:0;overflow:hidden">
           <div class="chat-box">
@@ -19,9 +19,9 @@
           </div>
         </div>
         <div>
-          <div class="card"><h3>🤖 What the assistant can do</h3><ul class="small muted" style="padding-left:18px;margin:0">
-            <li>Answer from your live loan data — balances, due dates, schedules</li><li>Explain products, rates, fees and requirements</li><li>Guide you through applying, repaying and settling</li><li>Open a support ticket for a human agent (type “create ticket”)</li></ul></div>
-          <div class="card"><h3>🎧 Need a human?</h3><p class="small muted">Open a ticket and our customer care team responds — within 2 working days at the latest. Urgent? Call <b>${GFS.COMPANY.phone}</b>.</p><a href="#/portal/support" class="btn btn-emerald btn-sm">Open a ticket →</a></div>
+          <div class="card"><h3>What the automated assistant can do</h3><ul class="small muted" style="padding-left:18px;margin:0">
+            <li>Answer from your portal records — balances, due dates, schedules</li><li>Explain products, rates, fees and requirements</li><li>Guide you through applying, repaying and settling</li><li>Open a tracked ticket for human review (type “create ticket”)</li></ul></div>
+          <div class="card"><h3>🎧 Need a human?</h3><p class="small muted">Open a tracked ticket for human review. Automated acknowledgements are labelled as such. For urgent matters call <b>${GFS.COMPANY.phone}</b>.</p><a href="#/portal/support" class="btn btn-emerald btn-sm">Open a ticket →</a></div>
           <div class="card" style="background:var(--emerald-50)"><h3>🕘 Chat history</h3><p class="small muted mb-0">Your conversation is saved to your account and visible only to you and support staff.</p></div>
         </div>
       </div>`;
@@ -42,7 +42,7 @@
     }
   });
   function msgHtml(m) {
-    const who = m.sender === 'customer' ? 'You' : m.sender === 'bot' ? 'GFS Assistant' : (m.sender_name || 'GFS Customer Care');
+    const who = m.sender === 'customer' ? 'You' : m.sender === 'bot' ? 'Automated assistant' : (m.sender_name || 'Support agent');
     return `<div class="msg ${m.sender}"><div class="m-who">${esc(who)} · ${GFS.fmtDateTime(m.createdAt || m.created_at)}</div>${esc(m.body)}</div>`;
   }
 
@@ -50,7 +50,7 @@
   App.route('/portal/support', {
     title: 'Support & Complaints', layout: 'portal', auth: true, render: async () => {
       const d = await API.get('/api/tickets');
-      return head('Support Tickets & Complaints', 'Track every request — acknowledged within 2 working days, resolved within 14', '<button class="btn btn-gold" id="new-ticket">+ New ticket / complaint</button>') + `
+      return head('Support Tickets & Complaints', 'Track questions, payment issues, complaints and feedback', '<button class="btn btn-gold" id="new-ticket">+ New ticket / complaint</button>') + `
       <div class="grid grid-3 mb-2">
         <div class="kpi blue"><div class="k-label">Open</div><div class="k-value">${d.tickets.filter(t => t.status === 'open').length}</div></div>
         <div class="kpi emerald"><div class="k-label">Resolved</div><div class="k-value">${d.tickets.filter(t => ['resolved', 'closed'].includes(t.status)).length}</div></div>
@@ -69,7 +69,7 @@
               ${UI.field('Priority', UI.select('priority', [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']], 'normal'))}
             </div>
             ${UI.field('Message', '<textarea name="message" required maxlength="4000" placeholder="Describe the issue in detail…"></textarea>')}
-            <div class="alert alert-info small">Complaints are escalated automatically and tracked to resolution. You will get SMS and email updates.</div>
+            <div class="alert alert-info small">Your message is recorded and queued for review. Delivery of SMS/email updates depends on provider configuration.</div>
             <div class="m-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-gold">Submit Ticket</button></div>
           </form>`);
         UI.bindForm(m.el.querySelector('#ticket-form'), async data => { const d = await API.post('/api/tickets', data); m.close(); UI.toast(`Ticket ${d.ticket.ref} created ✓`); App.render(); });
@@ -129,10 +129,10 @@
   });
   function notifList(ns) {
     if (!ns.length) return UI.empty('🔔', 'Nothing here yet', 'Notifications about your loans, payments and account appear here.');
-    return ns.map(n => `<div class="notif-item ${!n.readAt && n.channel === 'inapp' ? 'unread' : ''}">
+    return ns.map(n => `<div class="notif-item ${!(n.readAt || n.read_at) && n.channel === 'inapp' ? 'unread' : ''}">
       <div class="n-ico">${UI.notifIcon(n.category)}</div>
-      <div style="flex:1;min-width:0"><div class="n-title">${esc(n.title)}</div><div class="n-body">${esc(n.body)}</div><div class="n-time mt-1">${GFS.fmtDateTime(n.createdAt || n.created_at)} · ${esc(n.category)}</div></div>
-      ${!n.readAt && n.channel === 'inapp' ? `<button class="btn btn-ghost btn-sm" data-read="${n.id}">Mark read</button>` : ''}
+      <div style="flex:1;min-width:0"><div class="n-title">${esc(n.title)}</div><div class="n-body">${esc(n.body)}</div><div class="n-time mt-1">${GFS.fmtDateTime(n.createdAt || n.created_at)} · ${esc(n.category)}${n.channel !== 'inapp' ? ' · ' + esc((n.delivery_status || 'not_configured').replaceAll('_', ' ')) : ''}</div></div>
+      ${!(n.readAt || n.read_at) && n.channel === 'inapp' ? `<button class="btn btn-ghost btn-sm" data-read="${n.id}">Mark read</button>` : ''}
     </div>`).join('');
   }
 })();

@@ -15,7 +15,7 @@
       <div class="grid grid-2" style="align-items:start">
         <div class="card card-accent"><h3>👤 Personal information</h3>
           <div class="flex mb-2"><div class="avatar" style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,var(--gold-2),var(--gold));display:flex;align-items:center;justify-content:center;font:800 22px var(--font);color:var(--gold-ink);overflow:hidden" id="avatar-box">${u.avatarDocId ? `<img src="api/documents/${u.avatarDocId}/file" style="width:100%;height:100%;object-fit:cover" alt="">` : UI.initials(u.firstName, u.lastName)}</div>
-            <div><b>${esc(u.name)}</b><div class="tiny muted">${esc(u.email)} · ${esc(u.phone)}</div><label class="btn btn-ghost btn-sm mt-1" style="cursor:pointer">📷 Change photo<input type="file" id="avatar-input" accept="image/png,image/jpeg,image/webp" hidden></label></div></div>
+            <div><b>${esc(u.firstName)} ${esc(u.lastName)}</b><div class="tiny muted">${esc(u.email)} · ${esc(u.phone)}</div><label class="btn btn-ghost btn-sm mt-1" style="cursor:pointer">📷 Change photo<input type="file" id="avatar-input" accept="image/png,image/jpeg" hidden></label></div></div>
           <form id="personal-form">
             <div class="form-grid">
               ${UI.field('First name', UI.input('firstName', `value="${esc(u.firstName)}" required`))}
@@ -25,7 +25,7 @@
               ${UI.field('Marital status', UI.select('maritalStatus', [['', 'Select…'], ['Single', 'Single'], ['Married', 'Married'], ['Divorced', 'Divorced'], ['Widowed', 'Widowed']], u.maritalStatus || ''))}
               ${UI.field('ID type', UI.select('idType', [['national_id', 'National ID'], ['passport', 'Passport'], ['driving_licence', 'Driving licence']], u.idType || 'national_id'))}
             </div>
-            ${UI.field('ID number', UI.input('nationalId', `value="${esc(u.nationalId || '')}" placeholder="e.g. 123456/78/9"`), 'Encrypted at rest. Shown masked after saving.')}
+            ${UI.field('ID number', UI.input('nationalId', `value="${esc(u.nationalIdMasked || '')}" placeholder="e.g. 123456/78/9"`), 'Encrypted at rest. Shown masked after saving.')}
             <button class="btn btn-emerald" type="submit">Save personal info</button>
           </form>
         </div>
@@ -57,8 +57,8 @@
             ${UI.field('Employment status', UI.select('status', [['', 'Select…'], ['Employed — salaried', 'Employed — salaried'], ['Self-employed', 'Self-employed'], ['Business owner', 'Business owner'], ['Farmer', 'Farmer'], ['Student', 'Student'], ['Other', 'Other']], e.status || ''))}
             <div class="form-grid">
               ${UI.field('Employer / business name', UI.input('employer', `value="${esc(e.employer || '')}"`))}
-              ${UI.field('Role / position', UI.input('role', `value="${esc(e.role || '')}"`))}
-              ${UI.field('Years employed', UI.input('years', `type="number" min="0" value="${e.years || ''}"`))}
+              ${UI.field('Role / position', UI.input('position', `value="${esc(e.position || e.role || '')}"`))}
+              ${UI.field('Employed since', UI.input('employedSince', `type="date" value="${esc(e.employedSince || '')}"`))}
               ${UI.field('Pay day (day of month)', UI.input('payDay', `type="number" min="1" max="31" value="${e.payDay || ''}"`))}
             </div>
             <button class="btn btn-emerald" type="submit">Save employment</button>
@@ -69,10 +69,10 @@
             <div class="form-grid">
               ${UI.field('Business name', UI.input('name', `value="${esc(b.name || '')}"`))}
               ${UI.field('Sector / type', UI.input('type', `value="${esc(b.type || '')}"`))}
-              ${UI.field('Registration no.', UI.input('regNo', `value="${esc(b.regNo || '')}"`))}
-              ${UI.field('Years trading', UI.input('years', `type="number" min="0" value="${b.years || ''}"`))}
+              ${UI.field('Registration no.', UI.input('registrationNo', `value="${esc(b.registrationNo || b.regNo || '')}"`))}
+              ${UI.field('Trading since', UI.input('started', `value="${esc(b.started || '')}" placeholder="e.g. 2020"`))}
             </div>
-            <label class="check"><input type="checkbox" name="registered" ${b.registered ? 'checked' : ''}> Registered business</label>
+            
             <button class="btn btn-emerald" type="submit">Save business</button>
           </form>
           <hr class="divider"><h3>💵 Monthly income</h3>
@@ -85,6 +85,7 @@
             <button class="btn btn-emerald" type="submit">Save income</button>
           </form>
         </div>
+      <div class="card mt-2"><div class="card-title-row"><div><h3>Contact verification</h3><p>Verify the phone and email used for security codes and account recovery.</p></div><span class="badge badge-gold">Account security</span></div><div class="grid grid-2"><div class="contact-verify-row">${UI.icon('phone')}<div><b>${esc(u.phone)}</b><span>${u.phoneVerified ? 'Verified' : 'Not verified'}</span></div>${u.phoneVerified ? UI.badge('verified') : '<button class="btn btn-ghost btn-sm" id="verify-phone-btn">Verify phone</button>'}</div><div class="contact-verify-row">${UI.icon('mail')}<div><b>${esc(u.email)}</b><span>${u.emailVerified ? 'Verified' : 'Not verified'}</span></div>${u.emailVerified ? UI.badge('verified') : '<button class="btn btn-ghost btn-sm" id="verify-email-btn">Verify email</button>'}</div></div></div>
       </div>`;
     },
     mount: async el => {
@@ -93,7 +94,7 @@
       UI.bindForm(el.querySelector('#address-form'), d => save(el.querySelector('#address-form'), x => x));
       UI.bindForm(el.querySelector('#kin-form'), d => save(el.querySelector('#kin-form'), x => ({ nextOfKin: { name: x.kName, relationship: x.kRelationship, phone: x.kPhone, address: x.kAddress } })));
       UI.bindForm(el.querySelector('#employ-form'), d => save(el.querySelector('#employ-form'), x => ({ employment: x })));
-      UI.bindForm(el.querySelector('#business-form'), d => save(el.querySelector('#business-form'), x => ({ business: { ...x, registered: !!x.registered } })));
+      UI.bindForm(el.querySelector('#business-form'), d => save(el.querySelector('#business-form'), x => ({ business: x })));
       UI.bindForm(el.querySelector('#income-form'), d => save(el.querySelector('#income-form'), x => ({ monthlyIncome: Number(x.monthlyIncome), otherIncome: Number(x.otherIncome), monthlyExpenses: Number(x.monthlyExpenses) })));
       const av = el.querySelector('#avatar-input');
       av.onchange = async () => {
@@ -102,30 +103,39 @@
         const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result.split(',')[1]); fr.readAsDataURL(file); });
         try { const d = await API.post('/api/documents', { kind: 'avatar', filename: file.name, mime: file.type, data }); App.user.avatarDocId = d.document.id; UI.toast('Photo updated ✓'); App.render(); } catch (e) { UI.toast(e.message, 'err'); }
       };
+      const verifyContact = async purpose => {
+        try {
+          const ch = await API.post('/api/auth/resend-otp', { purpose });
+          const m = UI.modal(`<h3>${purpose === 'verify_phone' ? 'Verify phone' : 'Verify email'}</h3>${ch.devCode ? `<div class="demo-box"><b>Sandbox code:</b> <span class="mono">${esc(ch.devCode)}</span></div>` : '<p class="muted">Enter the code sent to your contact address.</p>'}<form id="contact-otp-form">${UI.field('Verification code', UI.input('code', 'maxlength="6" inputmode="numeric" required'))}<button class="btn btn-gold btn-block" type="submit">Verify</button></form>`);
+          UI.bindForm(m.el.querySelector('#contact-otp-form'), async data => { const r = await API.post('/api/auth/verify-otp', { purpose, challenge: ch.challenge, code: data.code }); App.user = r.user; m.close(); UI.toast('Contact verified.'); App.render(); });
+        } catch (e) { UI.toast(e.message, 'err'); }
+      };
+      el.querySelector('#verify-phone-btn')?.addEventListener('click', () => verifyContact('verify_phone'));
+      el.querySelector('#verify-email-btn')?.addEventListener('click', () => verifyContact('verify_email'));
     }
   });
 
   /* ---------------- DOCUMENTS & KYC ---------------- */
-  const DOC_KINDS = [['national_id', '🪪 National ID'], ['passport', '🛂 Passport'], ['driving_licence', '🚗 Driving licence'], ['payslip', '💷 Payslip'], ['bank_statement', '🏦 Bank statement'], ['business_statement', '🏪 Business statement'], ['proof_of_address', '🏠 Proof of address'], ['admission_letter', '🎓 Admission letter'], ['medical_report', '🏥 Medical report'], ['quotation', '📄 Quotation / invoice'], ['land_document', '🌍 Land document'], ['house_document', '🏠 House document'], ['vehicle_document', '🚗 Vehicle document'], ['livestock_document', '🐄 Livestock document'], ['guarantor_id', '🤝 Guarantor ID'], ['other', '📎 Other']];
+  const DOC_KINDS = [['national_id', 'National ID'], ['passport', 'Passport'], ['driving_licence', 'Driving licence'], ['payslip', 'Payslip'], ['bank_statement', 'Bank statement'], ['business_statement', 'Business statement'], ['proof_of_address', 'Proof of address'], ['business_registration', 'Business registration'], ['admission_letter', 'Admission letter'], ['medical_report', 'Medical report'], ['supplier_invoice', 'Supplier invoice'], ['property_title', 'Property title'], ['valuation_report', 'Valuation report'], ['guarantor_id', 'Guarantor ID'], ['guarantor_consent', 'Guarantor consent'], ['collateral_document', 'Collateral document'], ['other', 'Other']];
   App.route('/portal/documents', {
     title: 'Documents & KYC', layout: 'portal', auth: true, render: async () => {
       const d = await API.get('/api/documents');
       const u = App.user;
-      const hasId = d.documents.some(x => ['national_id', 'passport', 'driving_licence'].includes(x.kind) && x.status === 'verified');
-      const hasIncome = d.documents.some(x => ['payslip', 'bank_statement', 'business_statement'].includes(x.kind) && x.status === 'verified');
-      const steps = [['Phone verified', u.phoneVerified], ['Email verified', u.emailVerified], ['ID document', hasId], ['Proof of income', hasIncome]];
+      const hasId = d.documents.some(x => ['national_id', 'passport', 'driving_licence'].includes(x.kind));
+      const hasIncome = d.documents.some(x => ['payslip', 'bank_statement', 'business_statement'].includes(x.kind));
+      const steps = [['Phone verified', u.phoneVerified], ['Email verified', u.emailVerified], ['ID uploaded', hasId], ['Income evidence uploaded', hasIncome], ['Identity review', u.kycStatus === 'verified']];
       const done = steps.filter(s => s[1]).length;
       return head('Documents & KYC', 'Secure, encrypted document storage — only you can see your files') + `
-      <div class="card card-accent"><div class="flex-between wrap"><div><h3 class="mb-0">🪪 KYC status: ${UI.badge(d.kycStatus)}</h3><div class="muted small mt-1">${done}/4 verification steps complete</div></div><div style="min-width:220px;flex:1;max-width:340px">${UI.progressBar(done / 4 * 100)}</div></div>
-        <div class="grid grid-4 mt-2">${steps.map(([l, ok]) => `<div class="pill" style="border-color:${ok ? 'var(--emerald)' : 'var(--line)'};color:${ok ? 'var(--emerald-700)' : 'var(--muted)'}">${ok ? '✓' : '○'} ${l}</div>`).join('')}</div>
-        ${(!u.phoneVerified || !u.emailVerified) ? `<div class="alert alert-warn mt-2 small">Verify your phone and email to complete KYC. <a href="#/verify">Verify now →</a></div>` : ''}
+      <div class="card card-accent"><div class="flex-between wrap"><div><h3 class="mb-0">🪪 KYC status: ${UI.badge(u.kycStatus)}</h3><div class="muted small mt-1">${done}/5 readiness steps complete</div></div><div style="min-width:220px;flex:1;max-width:340px">${UI.progressBar(done / 5 * 100)}</div></div>
+        <div class="grid grid-5 mt-2">${steps.map(([l, ok]) => `<div class="pill" style="border-color:${ok ? 'var(--emerald)' : 'var(--line)'};color:${ok ? 'var(--emerald-700)' : 'var(--muted)'}">${ok ? '✓' : '○'} ${l}</div>`).join('')}</div>
+        ${(!u.phoneVerified || !u.emailVerified) ? `<div class="alert alert-warn mt-2 small">Verify your phone and email from your profile. Uploads still require separate identity review. <a href="#/portal/profile">Profile →</a></div>` : ''}
       </div>
       <div class="grid grid-2 mt-2" style="align-items:start">
         <div class="card"><h3>📤 Upload a document</h3>
           <form id="doc-form">
             ${UI.field('Document type', UI.select('kind', DOC_KINDS, 'national_id'))}
             ${UI.field('Link to application (optional)', UI.input('applicationId', 'placeholder="Application ID (optional)"'))}
-            <div class="upload-zone" id="drop-zone"><div style="font-size:30px">📎</div><b>Tap to choose a file</b><div class="tiny muted">PNG, JPG, WEBP or PDF · max 5 MB · encrypted at rest</div><input type="file" id="doc-file" accept="image/png,image/jpeg,image/webp,application/pdf" hidden></div>
+            <div class="upload-zone" id="drop-zone"><div style="font-size:30px">📎</div><b>Tap to choose a file</b><div class="tiny muted">PNG, JPG or PDF · max 8 MB · encrypted in backend mode</div><input type="file" id="doc-file" accept="image/png,image/jpeg,application/pdf" hidden></div>
             <div id="doc-chosen" class="small mt-1 muted"></div>
             <button class="btn btn-gold btn-block mt-2" type="submit" id="doc-submit" disabled>Upload Securely 🔐</button>
           </form>
@@ -138,7 +148,7 @@
     mount: async el => {
       const zone = el.querySelector('#drop-zone'), fileInput = el.querySelector('#doc-file'), chosen = el.querySelector('#doc-chosen'), submit = el.querySelector('#doc-submit');
       let file = null;
-      const pick = f => { if (!f) return; if (f.size > 5 * 1024 * 1024) return UI.toast('File too large (max 5 MB).', 'err'); file = f; chosen.innerHTML = `📎 <b>${esc(f.name)}</b> (${(f.size / 1024).toFixed(0)} KB)`; submit.disabled = false; };
+      const pick = f => { if (!f) return; if (f.size > 8 * 1024 * 1024) return UI.toast('File too large (max 8 MB).', 'err'); file = f; chosen.innerHTML = `📎 <b>${esc(f.name)}</b> (${(f.size / 1024).toFixed(0)} KB)`; submit.disabled = false; };
       zone.onclick = () => fileInput.click();
       fileInput.onchange = () => pick(fileInput.files[0]);
       zone.ondragover = e => { e.preventDefault(); zone.classList.add('drag'); };
@@ -148,7 +158,7 @@
         if (!file) throw new Error('Choose a file first.');
         const b64 = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result.split(',')[1]); fr.readAsDataURL(file); });
         await API.post('/api/documents', { kind: data.kind, applicationId: data.applicationId || undefined, filename: file.name, mime: file.type, data: b64 });
-        UI.toast('Document uploaded and encrypted 🔐'); await App.refreshUser(); App.render();
+        UI.toast(API.mode === 'local' ? 'Sandbox metadata recorded; file content discarded.' : 'Document uploaded and encrypted; awaiting review.'); await App.refreshUser(); App.render();
       });
       el.querySelectorAll('[data-view]').forEach(b => b.onclick = async () => { try { const url = await API.fileURL(`/api/documents/${b.dataset.view}/file`); window.open(url, '_blank'); } catch (e) { UI.toast(e.message, 'warn'); } });
       el.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { if (await UI.confirmDialog('Delete document?', 'This file will be permanently removed.', { confirmText: 'Delete', danger: true })) { await API.del(`/api/documents/${b.dataset.del}`); UI.toast('Document deleted.'); App.render(); } });
@@ -158,7 +168,9 @@
   /* ---------------- GUARANTORS ---------------- */
   App.route('/portal/guarantors', {
     title: 'Guarantors', layout: 'portal', auth: true, render: async () => {
-      const d = await API.get('/api/guarantors');
+      const [d, docs] = await Promise.all([API.get('/api/guarantors'), API.get('/api/documents')]);
+      const consentDocs = docs.documents.filter(x => x.kind === 'guarantor_consent').map(x => [x.id, x.filename]);
+      const idDocs = docs.documents.filter(x => x.kind === 'guarantor_id').map(x => [x.id, x.filename]);
       return head('Guarantors', 'People who stand behind your loans — with their consent') + `
       <div class="grid grid-2" style="align-items:start">
         <div class="card card-accent"><h3>🤝 Add a guarantor</h3>
@@ -170,7 +182,9 @@
               ${UI.field('Employer', UI.input('employer', ''))}
             </div>
             ${UI.field('Address', UI.input('address', ''))}
-            <label class="check"><input type="checkbox" name="consent" required> The guarantor consents to guarantee my loan and to be contacted for verification.</label>
+            <div class="alert alert-info small">Optional: upload guarantor ID and signed consent documents first, then select them here. Independent verification is still required.</div>
+            <div class="form-grid">${UI.field('Consent document (optional)', UI.select('consentDocumentId', [['', 'None'], ...consentDocs], ''))}${UI.field('Guarantor ID document (optional)', UI.select('identityDocumentId', [['', 'None'], ...idDocs], ''))}</div>
+            <label class="check"><input type="checkbox" name="consent" required> I confirm the guarantor has agreed to be contacted. Independent consent and identity verification are still required.</label>
             <button class="btn btn-gold btn-block" type="submit">Add Guarantor</button>
           </form>
         </div>
@@ -187,7 +201,7 @@
     title: 'Collateral', layout: 'portal', auth: true, render: async () => {
       const d = await API.get('/api/collateral');
       const types = [['land', '🌍 Land'], ['house', '🏠 House'], ['vehicle', '🚗 Vehicle'], ['household_property', '🛋️ Household property'], ['livestock', '🐄 Livestock'], ['equipment', '⚙️ Equipment'], ['other', '📦 Other']];
-      return head('Collateral & Security', 'Assets pledged against your loans — released automatically on settlement') + `
+      return head('Collateral & Security', 'Assets pledged against your loans — valuation and release require authorised records') + `
       <div class="grid grid-2" style="align-items:start">
         <div class="card card-accent"><h3>🏠 Add collateral</h3>
           <form id="c-form">
@@ -236,7 +250,7 @@
         </div>
         <div>
           <div class="card"><h3>💻 Active sessions</h3>
-            ${sess.sessions.map(s => `<div class="doc-tile mb-1"><div class="d-ico">💻</div><div style="flex:1"><div class="d-name">${s.current ? 'This device' : esc(s.ip || 'Device')}</div><div class="tiny muted">${esc((s.user_agent || '').slice(0, 60))}… · last seen ${GFS.fmtDateTime(s.last_seen)}</div></div>${s.current ? '<span class="badge badge-green">Current</span>' : `<button class="btn btn-danger btn-sm" data-revoke="${s.id}">Revoke</button>`}</div>`).join('')}
+            ${sess.sessions.map(s => `<div class="doc-tile mb-1"><div class="d-ico">💻</div><div style="flex:1"><div class="d-name">${s.current ? 'This device' : esc(s.ip || 'Device')}</div><div class="tiny muted">${esc((s.user_agent || '').slice(0, 60))}… · last seen ${GFS.fmtDateTime(s.last_seen_at || s.last_seen)}</div></div>${s.current ? '<span class="badge badge-green">Current</span>' : `<button class="btn btn-danger btn-sm" data-revoke="${s.id}">Revoke</button>`}</div>`).join('')}
           </div>
           <div class="card"><h3>🕘 Recent security activity</h3>
             ${act.activity.slice(0, 12).map(a => `<div class="flex-between" style="padding:8px 0;border-bottom:1px solid var(--line-2)"><div class="small"><b>${esc(a.action)}</b>${a.detail ? `<div class="tiny muted">${esc(a.detail)}</div>` : ''}</div><div class="tiny muted nowrap">${GFS.fmtDateTime(a.created_at || a.createdAt)}</div></div>`).join('') || '<p class="muted small">No activity yet.</p>'}
@@ -247,7 +261,15 @@
     },
     mount: async el => {
       UI.bindForm(el.querySelector('#pw-form'), async data => { if (data.newPassword !== data.confirm) throw new Error('Passwords do not match.'); await API.post('/api/auth/change-password', data); UI.toast('Password changed ✓ Other sessions signed out.'); });
-      el.querySelector('#twofa-toggle').onclick = async () => { const enable = !App.user.twofaEnabled; try { await API.put('/api/security/2fa', { enabled: enable }); await App.refreshUser(); UI.toast(`2FA ${enable ? 'enabled' : 'disabled'} ✓`); App.render(); } catch (e) { UI.toast(e.message, 'err'); } };
+      el.querySelector('#twofa-toggle').onclick = async () => {
+        const enable = !App.user.twofaEnabled;
+        try {
+          let challenge = null, devCode = null;
+          if (enable) { const ch = await API.post('/api/auth/verification-challenge', { purpose: 'login_2fa' }); challenge = ch.challenge; devCode = ch.devCode; }
+          const m = UI.modal(`<h3>${enable ? 'Enable' : 'Disable'} two-factor authentication</h3>${devCode ? `<div class="demo-box"><b>Sandbox phone code:</b> <span class="mono">${esc(devCode)}</span></div>` : ''}<form id="twofa-settings-form">${UI.field('Current password', UI.input('password', 'type="password" required autocomplete="current-password"'))}${enable ? UI.field('Phone verification code', UI.input('code', 'maxlength="6" inputmode="numeric" required')) : ''}<button class="btn btn-gold btn-block" type="submit">${enable ? 'Enable 2FA' : 'Disable 2FA'}</button></form>`);
+          UI.bindForm(m.el.querySelector('#twofa-settings-form'), async data => { await API.put('/api/security/2fa', { enabled: enable, password: data.password, challenge, code: data.code }); await App.refreshUser(); m.close(); UI.toast(`2FA ${enable ? 'enabled' : 'disabled'}.`); App.render(); });
+        } catch (e) { UI.toast(e.message, 'err'); }
+      };
       el.querySelectorAll('[data-revoke]').forEach(b => b.onclick = async () => { await API.del(`/api/security/sessions/${b.dataset.revoke}`); UI.toast('Session revoked.'); App.render(); });
     }
   });
@@ -280,16 +302,17 @@
         </div>
         <div>
           <div class="card"><div class="flex-between"><h3 class="mb-0">🏢 System settings</h3><span class="badge badge-gold">🔒 Read-only</span></div>
-            <div class="alert alert-info small mt-1">These settings are owned by the <b>${esc(sys.ownedBy)}</b> and synced to this portal. Customer accounts cannot change them — any attempt is refused and logged.</div>
+            <div class="alert alert-info small mt-1">These settings are owned by the <b>${esc(sys.ownedBy)}</b> and published to this portal when the authenticated connector is configured. Customer accounts cannot change them.</div>
             ${UI.table(['Setting', 'Value'], [['Currency', esc(sys.currency)], ['Company', esc(sys.company.name)], ['Support email', esc(sys.company.support)], ['Products', sys.products.length + ' configured'], ['Affordability cap', (sys.rules.affordabilityCap * 100) + '% of net income'], ['Late penalty', sys.rules.latePenaltyPct + '% / month'], ['Grace period', sys.rules.graceDays + ' days'], ['Max active loans', sys.rules.maxActiveLoans], ['Session timeout', sys.rules.idleTimeoutMinutes + ' min idle']])}
             <details class="mt-2"><summary class="small" style="cursor:pointer;font-weight:700">View configured product rates</summary>
               ${UI.table(['Product', 'Rate/mo', 'Fee', 'Range'], sys.products.map(p => [esc(p.name), p.rate + '%', p.fee + '%', `${GFS.mk(p.min)}–${GFS.mk(p.max)}`]))}
             </details>
           </div>
-          <div class="card"><h3>🔗 Linked system</h3>
-            <p class="small muted mb-1">This portal is linked to the <b>Golden Loan Services</b> back-office system — one central record for applications, payments and statements.</p>
-            ${UI.table(['Connection', 'Detail'], [['System', esc(ist.linkedSystem.name)], ['URL', `<a href="${esc(ist.linkedSystem.url)}" target="_blank" rel="noopener">${esc(ist.linkedSystem.url)}</a>`], ['Repository', `<a href="${esc(ist.linkedSystem.repo || GFS.COMPANY.adminRepo)}" target="_blank" rel="noopener">GitHub</a>`], ['Backend', API.mode === 'server' ? '🟢 Secure backend connected' : '🟡 Device-local demo (GitHub Pages)'], ['Shared bridge keys', (ist.linkedSystem.bridgeKeys || []).map(k => `<span class="mono tiny">${k}</span>`).join('<br>')]])}
-            <a href="${esc(ist.linkedSystem.url)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm mt-2">Open admin system ↗</a>
+          <div class="card"><div class="card-title-row"><h3>System connection</h3><span class="badge ${ist.connected ? 'badge-green' : 'badge-amber'}">${ist.connected ? 'Connected' : 'Not connected'}</span></div>
+            <p class="small muted">Golden Loan Services is the separate administration repository. Its public GitHub Pages version currently uses sample/browser-local data; it is not a live shared database.</p>
+            ${UI.table(['Connection', 'Detail'], [['Customer backend', API.mode === 'server' ? 'Connected to this website’s backend' : 'Device-local sandbox'], ['Admin connector', ist.connectorConfigured ? 'Configured — awaiting verified events' : 'Not configured'], ['Repository', `<a href="${esc(ist.repository || GFS.COMPANY.adminRepo)}" target="_blank" rel="noopener">golden-loan-services</a>`], ['Last successful sync', ist.lastSuccess ? GFS.fmtDateTime(ist.lastSuccess) : 'Never']])}
+            <div class="alert alert-info small mt-2">${esc(ist.note || 'A link alone does not synchronise databases.')}</div>
+            <a href="${esc(ist.url || GFS.COMPANY.adminSystem)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">View admin prototype ${UI.icon('external')}</a>
           </div>
         </div>
       </div>`;

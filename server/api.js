@@ -1,7 +1,9 @@
 /* API surface — every customer module connects to the same central database
    through these routes. RBAC: customers only; system settings are read-only. */
-import { Router, ok, created, sendJSON } from './http.js';
+import { Router, ok, created, sendJSON, HttpError } from './http.js';
 import { q, q1, getSetting } from './db.js';
+import * as catalog from './catalog.js';
+import { DEMO_MODE } from './config.js';
 import * as auth from './auth.js';
 import * as loans from './loans.js';
 import * as payments from './payments.js';
@@ -18,7 +20,7 @@ export const router = new Router();
 router.get('/api/health', integration.health);
 router.get('/api/config', integration.publicConfig);
 router.get('/api/integration/status', integration.status);
-router.get('/api/products', async () => ({ products: getSetting('products', GFS.PRODUCTS) }));
+router.get('/api/products', async () => ({ products: catalog.products() }));
 router.get('/api/branches', async () => ({ branches: getSetting('branches', GFS.BRANCHES) }));
 router.get('/api/faqs', async () => ({ faqs: GFS.FAQS }));
 router.get('/api/testimonials', async () => ({ testimonials: GFS.TESTIMONIALS }));
@@ -37,6 +39,7 @@ router.post('/api/auth/verify-otp', auth.verifyOtp);
 router.post('/api/auth/resend-otp', auth.resendOtp);
 router.post('/api/auth/forgot-password', auth.forgotPassword);
 router.post('/api/auth/reset-password', auth.resetPassword);
+router.post('/api/auth/verification-challenge', auth.verificationChallenge);
 router.post('/api/auth/change-password', auth.changePassword);
 router.get('/api/me', async ctx => ({ user: auth.publicUser(ctx.user) }));
 
@@ -52,6 +55,8 @@ router.get('/api/security/activity', auth.activityHistory);
 router.get('/api/dashboard', loans.dashboard);
 router.get('/api/loans', loans.listLoans);
 router.get('/api/loans/:id', loans.getLoan);
+router.get('/api/loans/:id/settlement', loans.getSettlement);
+router.get('/api/loans/:id/ledger', async ctx => { const u = auth.requireAuth(ctx); const l = q1(`SELECT id,ref FROM loans WHERE id=? AND customer_id=?`, Number(ctx.params.id), u.id); if (!l) throw new HttpError(404, 'Loan not found.'); return { loan: l, entries: q(`SELECT ref,bucket,delta_cents,description,created_at FROM ledger_entries WHERE loan_id=? ORDER BY id`, l.id) }; });
 router.get('/api/applications', loans.listApplications);
 router.post('/api/applications', loans.submitApplication);
 router.get('/api/applications/:id', loans.getApplication);
@@ -64,6 +69,7 @@ router.post('/api/requests', loans.createRequest);
 /* ---------- payments ---------- */
 router.post('/api/payments/initiate', payments.initiatePayment);
 router.post('/api/payments/:id/confirm', payments.confirmPayment);
+router.post('/api/payments/:id/proof', payments.submitPaymentProof);
 router.get('/api/transactions', payments.listTransactions);
 router.get('/api/receipts', payments.listReceipts);
 router.get('/api/receipts/:id', payments.getReceipt);
@@ -134,32 +140,11 @@ router.get('/api/export/my-data', async ctx => {
 });
 
 /* ---------- system settings: READ-ONLY for customers ---------- */
-router.get('/api/settings/system', async ctx => {
-  auth.requireAuth(ctx);
-  return {
-    readOnly: true,
-    ownedBy: 'Golden Loan Services back-office system',
-    company: getSetting('company', GFS.COMPANY),
-    products: getSetting('products', GFS.PRODUCTS),
-    paymentMethods: getSetting('payment_methods', GFS.PAYMENT_METHODS),
-    branches: getSetting('branches', GFS.BRANCHES),
-    rules: GFS.RULES,
-    theme: getSetting('theme', { gold: '#C9A227', emerald: '#0E9F6E' }),
-    currency: GFS.CURRENCY,
-    note: 'System settings are managed in the Golden Loan Services admin system and synced here. Customers cannot change them.'
-  };
-});
-/* Any attempt by a customer to WRITE system settings is refused. */
-const refuseSettingsWrite = async ctx => {
-  auth.requireAuth(ctx);
-  return sendJSON(ctx.res, 403, { error: 'System settings are managed by the back-office and cannot be changed from a customer account.', code: 'SETTINGS_READ_ONLY' });
-};
-router.post('/api/settings/system', refuseSettingsWrite);
-router.put('/api/settings/system', refuseSettingsWrite);
-router.post('/api/settings', refuseSettingsWrite);
-router.put('/api/settings', refuseSettingsWrite);
-
-/* ---------- back-office integration (server-to-server key) ---------- */
-router.get('/api/integration/export', integration.exportFeed);
+router.get('/api/settings/system', integration.customerSettings);
+const refuseSettingsWrite = async ctx => { auth.requireAuth(ctx); return sendJSON(ctx.res, 403, { error: 'System settings are managed by the back-office and cannot be changed from a customer account.', code: 'SETTINGS_READ_ONLY' }); };
+for (const method of ['post', 'put', 'patch', 'delete']) for (const path of ['/api/settings/system', '/api/settings']) router[method](path, refuseSettingsWrite);
+/* Server-to-server only; authenticated by timestamped HMAC, never a customer session. */
 router.post('/api/integration/settings', integration.pushSettings);
-router.post('/api/integration/decision', integration.pushDecision);
+router.post('/api/integration/events', integration.ingest);
+router.get('/api/integration/customers', integration.exportCustomers);
+router.get('/api/integration/applications', integration.exportApplications);
