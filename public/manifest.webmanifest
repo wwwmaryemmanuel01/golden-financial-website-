@@ -1,18 +1,14 @@
 {
-  "name": "Golden Financial Services",
-  "short_name": "Golden FS",
-  "description": "Loans in Malawi — apply, track, repay and manage your loans with Golden Financial Services.",
-  "start_url": "./index.html",
+  "name": "Golden Financial Services — Customer Portal",
+  "short_name": "Golden Finance",
+  "description": "Apply for loans, track repayments and manage your Golden Financial Services account in Malawi Kwacha.",
+  "start_url": "./#/portal",
   "scope": "./",
   "display": "standalone",
-  "orientation": "portrait-primary",
-  "background_color": "#064E3B",
+  "background_color": "#F5F8F6",
   "theme_color": "#064E3B",
   "icons": [
-    { "src": "assets/apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" },
-    { "src": "assets/logo.png", "sizes": "600x400", "type": "image/png", "purpose": "any" }
-  ],
-  "categories": ["finance", "business"],
-  "lang": "en",
-  "dir": "ltr"
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
 }

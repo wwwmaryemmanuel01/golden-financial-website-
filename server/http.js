@@ -2,7 +2,7 @@
    security headers. No external packages — Node built-ins only. */
 import fs from 'node:fs';
 import path from 'node:path';
-import { PUBLIC_DIR, IS_PROD } from './config.js';
+import { PUBLIC_DIR, IS_PROD, ALLOWED_ORIGINS } from './config.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -39,6 +39,7 @@ export function securityHeaders() {
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
     'Cross-Origin-Opener-Policy': 'same-origin',
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' " + ALLOWED_ORIGINS.join(' ') + "; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",
     ...(IS_PROD ? { 'Strict-Transport-Security': 'max-age=31536000; includeSubDomains' } : {})
   };
 }
@@ -109,10 +110,10 @@ export class Router {
 
 /* ---------------- static files (public/ only, traversal-safe) ---------------- */
 export function serveStatic(req, res, pathname) {
-  let rel = decodeURIComponent(pathname);
+  let rel; try { rel = decodeURIComponent(pathname); } catch { return bad(res, 'Invalid path.'); }
   if (rel === '/' || rel === '') rel = '/index.html';
   const file = path.normalize(path.join(PUBLIC_DIR, rel));
-  if (!file.startsWith(PUBLIC_DIR)) return notFound(res);
+  if (file !== PUBLIC_DIR && !file.startsWith(PUBLIC_DIR + path.sep)) return notFound(res);
   let target = file;
   try {
     const st = fs.statSync(target);

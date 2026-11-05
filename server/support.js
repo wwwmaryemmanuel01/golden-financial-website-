@@ -1,151 +1,85 @@
-/* Customer support: live chat (AI assistant + human handoff), support tickets,
-   complaints with tracking, feedback. The AI assistant answers from the same
-   product/rate data that drives the calculator — never invented figures. */
-import { q, q1, run, nextSeq, audit, activity, json } from './db.js';
+/* Honest automated assistance + persistent human-support tickets.
+   A bot acknowledgement is never labelled as a human agent. */
+import { q, q1, run, tx, nextSeq, audit, json } from './db.js';
 import { HttpError } from './http.js';
 import { clean } from './security.js';
 import { requireAuth } from './auth.js';
 import { notify } from './notifications.js';
+import { enqueue } from './events.js';
+import * as catalog from './catalog.js';
+import { AI_API_URL, AI_API_KEY } from './config.js';
 import GFS from '../shared/core.mjs';
-
-/* ---------------- AI assistant ---------------- */
 function botAnswer(u, message) {
-  const m = String(message || '').toLowerCase();
-  const loans = q(`SELECT * FROM loans WHERE customer_id = ? AND status = 'active'`, u.id);
-  const apps = q(`SELECT * FROM applications WHERE customer_id = ? ORDER BY id DESC LIMIT 1`, u.id);
-  const has = (...words) => words.some(w => m.includes(w));
-
-  if (has('hello', 'hi ', 'hey', 'muli', 'monire', 'good morning', 'good afternoon') || m.trim() === 'hi') {
-    return `Hello ${u.first_name}! 👋 I'm the Golden Financial Services assistant. I can help with loan products, rates, your balance, repayments, applications and documents. What would you like to know?`;
-  }
-  if (has('balance', 'owe', 'outstanding')) {
-    if (!loans.length) return 'You have no active loans right now. Would you like to apply? Open Apply for a Loan in your portal.';
-    return loans.map(l => `Loan ${l.ref} (${GFS.productById(l.product_id).name}): outstanding balance ${GFS.mk(l.outstanding_principal + l.accrued_interest + l.fees_outstanding + l.penalties)} — principal ${GFS.mk(l.outstanding_principal)}, next instalment ${GFS.mk(l.next_due_amount || 0)} due ${l.next_due_date || '—'}.`).join('\n');
-  }
-  if (has('next', 'due', 'when') && has('pay', 'repay', 'instal', 'due')) {
-    const next = loans.filter(l => l.next_due_date).sort((a, b) => a.next_due_date.localeCompare(b.next_due_date))[0];
-    return next ? `Your next payment is ${GFS.mk(next.next_due_amount)} on ${next.next_due_date} for loan ${next.ref}. You can pay now from Loans → Make a payment (TNM Mpamba, Airtel Money, bank or cash).` : 'You have no upcoming payments scheduled.';
-  }
-  if (has('rate', 'interest')) {
-    return 'Our monthly rates on the declining balance: ' + GFS.PRODUCTS.map(p => `${p.name} ${p.rate}%`).join(', ') + '. Arrangement fees are 1.0%–2.5% of the principal, deducted at disbursement. Use the Loan Calculator for an exact quote.';
-  }
-  if (has('product', 'loan type', 'which loan', 'types of')) {
-    return 'We offer 10 products: ' + GFS.PRODUCTS.map(p => p.name).join(', ') + '. Open Loan Products in the menu to compare amounts, terms and requirements, or tell me what you need money for and I will suggest one.';
-  }
-  for (const p of GFS.PRODUCTS) {
-    if (m.includes(p.name.toLowerCase().replace(' loans', '')) || m.includes(p.id.toLowerCase() + ' ')) {
-      return `${p.name}: ${GFS.mk(p.min)} – ${GFS.mk(p.max)}, ${p.rate}% per month (declining balance), ${p.fee}% arrangement fee, terms of ${p.terms.join(', ')} months. ${p.blurb} Requirements: ${p.eligibility.slice(0, 3).join('; ')}.`;
-    }
-  }
-  if (has('apply', 'application', 'borrow')) {
-    const last = apps[0];
-    if (last && ['submitted', 'under_review', 'pending_documents'].includes(last.status)) return `Your latest application ${last.ref} is ${last.status.replace(/_/g, ' ')} (${last.stage}). ${last.decision_reason || ''} Track it under Applications.`;
-    if (last && last.status === 'approved') return `Great news — application ${last.ref} is approved! Open Applications → Accept agreement to sign and receive your money.`;
-    return 'To apply: open Apply for a Loan, choose a product, amount and term, add your guarantor, upload your ID and proof of income, then submit. You will get a GLS-APP reference and can track every stage. Most complete applications are decided within 24 hours.';
-  }
-  if (has('repay', 'pay', 'mpamba', 'airtel', 'mobile money', 'bank')) {
-    return 'You can repay from your portal with TNM Mpamba (*444#), Airtel Money (*211#), bank transfer (FDH Bank 1000234567 or Standard Bank 9000123456) or cash at any branch. Every verified payment updates your balance instantly and issues a receipt. Open Loans → Make a payment.';
-  }
-  if (has('settle', 'early', 'clear', 'finish')) {
-    return loans.length ? 'You can settle early at any time — you pay only the outstanding principal plus interest accrued to today; all future interest is waived. Open your loan and choose Request settlement statement, then Settle loan.' : 'Early settlement applies when you have an active loan: you pay principal plus accrued interest only, and future interest is waived.';
-  }
-  if (has('document', 'kyc', 'id', 'upload', 'verify')) {
-    return `Your KYC status is ${u.kyc_status.replace(/_/g, ' ')}. Upload your national ID (or passport/driving licence) and proof of income under Profile → Documents. Files are encrypted and only you can see them.`;
-  }
-  if (has('penalt', 'late', 'overdue', 'miss')) {
-    return 'After a 3-day grace period, a late penalty of 2% of the overdue instalment applies per month overdue. You will get SMS and portal reminders. If you are struggling, contact us early — we can discuss restructuring your loan.';
-  }
-  if (has('top-up', 'topup', 'top up', 'renew', 'another loan', 'again')) {
-    return 'You can request a top-up, renewal or refinancing from Loans → Loan requests. Top-ups are available on active loans in good standing, up to 50% of the original principal (within product limits).';
-  }
-  if (has('human', 'agent', 'person', 'talk to', 'complain', 'complaint')) {
-    return 'I can connect you to a human agent. Open Support → New ticket (or type "create ticket" here) and our customer care team will respond — within 2 working days at the latest. For urgent matters call +265 1 770 100.';
-  }
-  if (has('thank', 'zikomo', 'thanks')) return 'You are welcome! 😊 Is there anything else I can help with?';
-  return `I can help with: your balance and next payment, loan products and rates, applying, repaying (Mpamba/Airtel/bank/cash), early settlement, documents and KYC, top-ups and renewals. Try asking “What is my balance?” or “Tell me about business loans”. For anything else, open a support ticket and a human agent will follow up.`;
+  const m = message.toLowerCase(), has = (...words) => words.some(w => m.includes(w));
+  const loans = q(`SELECT * FROM loans WHERE customer_id=? AND status='active'`, u.id), apps = q(`SELECT * FROM applications WHERE customer_id=? ORDER BY id DESC LIMIT 1`, u.id);
+  if (has('balance', 'owe', 'outstanding')) return loans.length ? loans.map(l => `${l.ref}: outstanding ${GFS.mk2(l.outstanding_principal + l.accrued_interest + l.fees_outstanding + l.penalties)}; next instalment ${GFS.mk2(l.next_due_amount || 0)} due ${l.next_due_date || 'not scheduled'}.`).join('\n') : 'You have no active loans. You can explore products and check eligibility before applying.';
+  if (has('rate', 'interest', 'fee')) return catalog.products().map(p => `${p.name}: ${p.rate}% monthly declining rate, ${p.fee}% arrangement fee`).join('\n') + '\nActual interest accrues daily on unpaid principal. The calculator shows an illustrative schedule.';
+  if (has('apply', 'application', 'status')) { const a = apps[0]; return a ? `Your latest application ${a.ref} is ${a.status.replaceAll('_', ' ')}. ${a.decision_reason || 'Open Applications for the full timeline.'}` : 'Open Apply for a loan, choose a product, complete your details, upload documents and submit. You will receive a tracking reference.'; }
+  if (has('settle', 'early', 'payoff')) return 'Open your loan and request a settlement quote. You pay outstanding principal, interest accrued to today, fees and penalties. Future unaccrued interest is waived. The quote is valid for today only.';
+  if (has('pay', 'mpamba', 'airtel', 'bank', 'cash')) return 'Open Payments to create a unique reference. Mobile-money confirmations require the configured provider; bank transfers and cashier records require reconciliation. A customer click alone never verifies a live payment.';
+  if (has('document', 'kyc', 'identity', 'upload')) return `Your identity-review status is ${u.kyc_status.replaceAll('_', ' ')}. Upload a valid ID and proof of income in Documents. Files are encrypted; an authorised reviewer must verify them separately.`;
+  if (has('late', 'penalty', 'overdue')) { const r = catalog.rules(); return `After ${r.graceDays} grace days, the published late charge is ${r.latePenaltyPct}% of the unpaid instalment. Contact support early if you need a restructuring review.`; }
+  if (has('top', 'renew', 'refinance', 'restructure')) return 'Open Loan requests to request a top-up, renewal, refinancing or restructuring. A request does not change your loan until an authorised decision is recorded.';
+  for (const p of catalog.products()) if (m.includes(p.name.toLowerCase().replace(' loans', ''))) return `${p.name}: ${GFS.mk(p.min)}–${GFS.mk(p.max)}, terms ${p.terms.join(', ')} months. ${p.blurb} Requirements: ${p.eligibility.join('; ')}.`;
+  if (has('school', 'education')) return 'Education Loans may fit school or university fees. Compare the published terms and use the eligibility check before applying.';
+  if (has('business', 'stock', 'shop')) return 'Business Loans may fit working capital, stock or equipment. Prepare trading records and income evidence; larger amounts may require security.';
+  if (has('hello', 'hi', 'muli', 'zikomo', 'thank')) return `Hello ${u.first_name}, zikomo. I’m the automated Golden assistant. Ask about your balance, products, rates, documents, repayments or application status. Choose Human support for a person to review your case.`;
+  return 'I can help with balances, products, rates, applications, documents and repayments. For account-specific decisions or complaints, choose Human support to open a tracked ticket.';
 }
-
 export async function chatSend(ctx) {
-  const u = requireAuth(ctx);
-  const body = clean(ctx.body.message, 2000);
-  if (!body) throw new HttpError(400, 'Type a message first.');
-  run(`INSERT INTO chat_messages(customer_id, sender, body) VALUES(?,?,?)`, u.id, 'customer', body);
-  let reply;
-  if (/create ticket|open ticket|new ticket/i.test(body)) {
+  const u = requireAuth(ctx), message = clean(ctx.body.message, 2000);
+  if (!message) throw new HttpError(400, 'Type a message first.');
+  if (ctx.body.handoff || /human support|create ticket|open ticket|talk to a person/i.test(message)) {
     const ref = GFS.refs.ticket(nextSeq('ticket'));
-    run(`INSERT INTO tickets(ref, customer_id, subject, category, status) VALUES(?,?,?,?,?)`, ref, u.id, body.slice(0, 120), 'general', 'open');
-    reply = `Done — I have opened support ticket ${ref} for you. A human agent will reply in Support → Tickets. Anything else I can help with meanwhile?`;
-  } else {
-    reply = botAnswer(u, body);
+    const id = Number(run(`INSERT INTO tickets(ref,customer_id,subject,category,status) VALUES(?,?,?,?,?)`, ref, u.id, message.slice(0, 150), 'general', 'open').lastInsertRowid);
+    run(`INSERT INTO ticket_messages(ticket_id,sender,sender_name,body) VALUES(?,?,?,?)`, id, 'customer', `${u.first_name} ${u.last_name}`, message);
+    enqueue('ticket', id, { type: 'support.ticket_created', ticketId: id, reference: ref, customerId: u.id });
+    const reply = `Ticket ${ref} is open and queued for human review. This is an automated acknowledgement, not a live agent. Track replies in Support.`;
+    run(`INSERT INTO chat_messages(customer_id,sender,body) VALUES(?,?,?)`, u.id, 'customer', message);
+    run(`INSERT INTO chat_messages(customer_id,sender,body) VALUES(?,?,?)`, u.id, 'bot', reply);
+    return { reply, sender: 'bot', ticketId: id, ticketRef: ref };
   }
-  run(`INSERT INTO chat_messages(customer_id, sender, body) VALUES(?,?,?)`, u.id, 'bot', reply);
-  return { reply, sender: 'bot' };
+  let reply = botAnswer(u, message), source = 'rules';
+  if (AI_API_URL && AI_API_KEY && ctx.body.aiConsent === true && !/balance|statement|password|national|phone|account number/i.test(message)) {
+    try {
+      const url = new URL(AI_API_URL); if (url.protocol !== 'https:') throw new Error('HTTPS required');
+      const res = await fetch(url, { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${AI_API_KEY}` }, body: JSON.stringify({ question: message, context: { products: catalog.products().map(p => ({ name: p.name, min: p.min, max: p.max, rate: p.rate, fee: p.fee, terms: p.terms })), currency: 'MWK' }, instruction: 'General product guidance only. Do not approve loans or invent account facts.' }), signal: AbortSignal.timeout(10000) });
+      if (res.ok) { const data = await res.json(); if (typeof data.answer === 'string' && data.answer.trim()) { reply = clean(data.answer, 4000); source = 'ai'; } }
+    } catch { /* Deterministic, account-aware fallback remains available. */ }
+  }
+  tx(() => { run(`INSERT INTO chat_messages(customer_id,sender,body) VALUES(?,?,?)`, u.id, 'customer', message); run(`INSERT INTO chat_messages(customer_id,sender,body) VALUES(?,?,?)`, u.id, 'bot', reply); });
+  return { reply, sender: 'bot', source };
 }
-export async function chatHistory(ctx) {
-  const u = requireAuth(ctx);
-  return { messages: q(`SELECT * FROM chat_messages WHERE customer_id = ? ORDER BY id ASC LIMIT 500`, u.id) };
-}
-
-/* ---------------- tickets & complaints ---------------- */
-export async function createTicket(ctx) {
-  const u = requireAuth(ctx);
-  const b = ctx.body;
-  const subject = clean(b.subject, 150);
-  const message = clean(b.message, 4000);
-  if (!subject || !message) throw new HttpError(400, 'Subject and message are required.');
-  const category = ['general', 'complaint', 'payment', 'application', 'account', 'feedback'].includes(b.category) ? b.category : 'general';
-  const priority = ['low', 'normal', 'high', 'urgent'].includes(b.priority) ? b.priority : (category === 'complaint' ? 'high' : 'normal');
-  const ref = GFS.refs.ticket(nextSeq('ticket'));
-  const r = run(`INSERT INTO tickets(ref, customer_id, subject, category, priority, status) VALUES(?,?,?,?,?,?)`, ref, u.id, subject, category, priority, 'open');
-  const id = Number(r.lastInsertRowid);
-  run(`INSERT INTO ticket_messages(ticket_id, sender, sender_name, body) VALUES(?,?,?,?)`, id, 'customer', `${u.first_name} ${u.last_name}`, message);
-  // Automated acknowledgement + first-line response (human follow-up queued)
-  const ack = category === 'complaint'
-    ? `Thank you for raising this, ${u.first_name}. Your complaint ${ref} has been logged and escalated to our customer care team. We acknowledge within 2 working days and resolve within 14 working days, in line with our complaints policy. You can track every update here.`
-    : `Thank you, ${u.first_name}. Ticket ${ref} is open. Our support team has been notified and will respond shortly. You will receive an SMS and email when there is a reply.`;
-  run(`INSERT INTO ticket_messages(ticket_id, sender, sender_name, body) VALUES(?,?,?,?)`, id, 'agent', 'GFS Customer Care', ack);
-  notify(u.id, { category: 'support', title: `${category === 'complaint' ? 'Complaint' : 'Ticket'} ${ref} opened`, body: ack, channels: ['inapp', 'sms', 'email'] });
-  audit('customer', u.id, `support.ticket_created`, 'ticket', id, null, { ref, category }, ctx.ip, ctx.ua);
-  return { ticket: serializeTicket(q1(`SELECT * FROM tickets WHERE id = ?`, id)) };
-}
+export async function chatHistory(ctx) { const u = requireAuth(ctx); return { messages: q(`SELECT id,sender,body,created_at FROM chat_messages WHERE customer_id=? ORDER BY id DESC LIMIT 200`, u.id).reverse(), aiConfigured: !!AI_API_URL && !!AI_API_KEY }; }
 const serializeTicket = t => ({ id: t.id, ref: t.ref, subject: t.subject, category: t.category, priority: t.priority, status: t.status, createdAt: t.created_at, updatedAt: t.updated_at });
-
-export async function listTickets(ctx) {
-  const u = requireAuth(ctx);
-  return { tickets: q(`SELECT * FROM tickets WHERE customer_id = ? ORDER BY id DESC`, u.id).map(serializeTicket) };
+const ownTicket = ctx => { const u = requireAuth(ctx), t = q1(`SELECT * FROM tickets WHERE id=? AND customer_id=?`, Number(ctx.params.id), u.id); if (!t) throw new HttpError(404, 'Ticket not found.'); return { u, t }; };
+export async function createTicket(ctx) {
+  const u = requireAuth(ctx), b = ctx.body, subject = clean(b.subject, 150), message = clean(b.message, 5000);
+  if (subject.length < 3 || message.length < 10) throw new HttpError(400, 'Enter a subject and at least 10 characters explaining the issue.');
+  const category = ['general', 'complaint', 'payment', 'application', 'account', 'feedback'].includes(b.category) ? b.category : 'general';
+  const priority = ['low', 'normal', 'high', 'urgent'].includes(b.priority) ? b.priority : category === 'complaint' ? 'high' : 'normal';
+  const attachment = b.attachmentDocId ? Number(b.attachmentDocId) : null;
+  if (attachment && !q1(`SELECT id FROM documents WHERE id=? AND customer_id=?`, attachment, u.id)) throw new HttpError(400, 'Invalid attachment.');
+  const ref = GFS.refs.ticket(nextSeq('ticket'));
+  const id = tx(() => { const id = Number(run(`INSERT INTO tickets(ref,customer_id,subject,category,priority,status) VALUES(?,?,?,?,?,?)`, ref, u.id, subject, category, priority, 'open').lastInsertRowid); run(`INSERT INTO ticket_messages(ticket_id,sender,sender_name,body,attachment_doc_id) VALUES(?,?,?,?,?)`, id, 'customer', `${u.first_name} ${u.last_name}`, message, attachment); run(`INSERT INTO ticket_messages(ticket_id,sender,sender_name,body) VALUES(?,?,?,?)`, id, 'bot', 'Automated acknowledgement', `Ticket ${ref} has been recorded and queued for review. No human agent has responded yet.`); enqueue('ticket', id, { type: 'support.ticket_created', ticketId: id, reference: ref, customerId: u.id, category }); return id; });
+  audit('customer', u.id, 'support.ticket_created', 'ticket', id, null, { ref, category }, ctx.ip, ctx.ua);
+  notify(u.id, { category: 'support', title: `Ticket ${ref} opened`, body: 'Your message is queued for human review. Track replies here.', channels: ['inapp'] });
+  return { ticket: serializeTicket(q1(`SELECT * FROM tickets WHERE id=?`, id)) };
 }
-export async function getTicket(ctx) {
-  const u = requireAuth(ctx);
-  const t = q1(`SELECT * FROM tickets WHERE id = ? AND customer_id = ?`, Number(ctx.params.id), u.id);
-  if (!t) throw new HttpError(404, 'Ticket not found.');
-  return { ticket: serializeTicket(t), messages: q(`SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY id ASC`, t.id) };
-}
+export async function listTickets(ctx) { const u = requireAuth(ctx); return { tickets: q(`SELECT * FROM tickets WHERE customer_id=? ORDER BY id DESC`, u.id).map(serializeTicket) }; }
+export async function getTicket(ctx) { const { t } = ownTicket(ctx); return { ticket: serializeTicket(t), messages: q(`SELECT id,sender,sender_name,body,attachment_doc_id,created_at FROM ticket_messages WHERE ticket_id=? ORDER BY id`, t.id) }; }
 export async function replyTicket(ctx) {
-  const u = requireAuth(ctx);
-  const t = q1(`SELECT * FROM tickets WHERE id = ? AND customer_id = ?`, Number(ctx.params.id), u.id);
-  if (!t) throw new HttpError(404, 'Ticket not found.');
-  if (t.status === 'closed') throw new HttpError(400, 'This ticket is closed. Open a new one if you need more help.');
-  const body = clean(ctx.body.message, 4000);
-  if (!body) throw new HttpError(400, 'Type a reply first.');
-  run(`INSERT INTO ticket_messages(ticket_id, sender, sender_name, body) VALUES(?,?,?,?)`, t.id, 'customer', `${u.first_name} ${u.last_name}`, body);
-  run(`UPDATE tickets SET status = 'open', updated_at = datetime('now') WHERE id = ?`, t.id);
-  const auto = `Thanks for the update — it has been added to ticket ${t.ref}. An agent will review it and respond. If your issue is urgent, call +265 1 770 100.`;
-  run(`INSERT INTO ticket_messages(ticket_id, sender, sender_name, body) VALUES(?,?,?,?)`, t.id, 'agent', 'GFS Customer Care', auto);
-  return { ok: true, reply: auto };
-}
-export async function closeTicket(ctx) {
-  const u = requireAuth(ctx);
-  const t = q1(`SELECT * FROM tickets WHERE id = ? AND customer_id = ?`, Number(ctx.params.id), u.id);
-  if (!t) throw new HttpError(404, 'Ticket not found.');
-  run(`UPDATE tickets SET status = 'closed', updated_at = datetime('now') WHERE id = ?`, t.id);
-  if (ctx.body.rating) {
-    run(`INSERT INTO ticket_messages(ticket_id, sender, sender_name, body) VALUES(?,?,?,?)`, t.id, 'customer', `${u.first_name} ${u.last_name}`, `Feedback: rated this support ${cleanNumRating(ctx.body.rating)}/5. ${clean(ctx.body.feedback, 500)}`);
-  }
+  const { u, t } = ownTicket(ctx), message = clean(ctx.body.message, 5000);
+  if (t.status === 'closed') throw new HttpError(409, 'This ticket is closed. Open a new one for further help.');
+  if (!message) throw new HttpError(400, 'Type a reply first.');
+  const attachment = ctx.body.attachmentDocId ? Number(ctx.body.attachmentDocId) : null;
+  if (attachment && !q1(`SELECT id FROM documents WHERE id=? AND customer_id=?`, attachment, u.id)) throw new HttpError(400, 'Invalid attachment.');
+  tx(() => { run(`INSERT INTO ticket_messages(ticket_id,sender,sender_name,body,attachment_doc_id) VALUES(?,?,?,?,?)`, t.id, 'customer', `${u.first_name} ${u.last_name}`, message, attachment); run(`UPDATE tickets SET status='open',updated_at=datetime('now') WHERE id=?`, t.id); enqueue('ticket', t.id, { type: 'support.customer_replied', ticketId: t.id, customerId: u.id, reference: t.ref }); });
   return { ok: true };
 }
-const cleanNumRating = v => Math.max(1, Math.min(5, Number(v) || 5));
-
-/* ---------------- announcements (public) ---------------- */
-export async function listAnnouncements(ctx) {
-  return { announcements: q(`SELECT * FROM announcements ORDER BY pinned DESC, id DESC LIMIT 50`) };
+export async function closeTicket(ctx) {
+  const { u, t } = ownTicket(ctx), rating = Number(ctx.body.rating);
+  tx(() => { run(`UPDATE tickets SET status='closed',updated_at=datetime('now') WHERE id=?`, t.id); if (ctx.body.rating !== undefined) { if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw new HttpError(400, 'Rating must be from 1 to 5.'); run(`INSERT INTO ticket_messages(ticket_id,sender,sender_name,body) VALUES(?,?,?,?)`, t.id, 'customer', `${u.first_name} ${u.last_name}`, `Feedback ${rating}/5: ${clean(ctx.body.feedback, 1000)}`); } });
+  return { ok: true };
 }
+export async function listAnnouncements() { return { announcements: q(`SELECT id,title,body,category,pinned,published_at FROM announcements ORDER BY pinned DESC,id DESC LIMIT 50`) }; }

@@ -6,61 +6,37 @@ const Money = (() => {
 
   /* ---------------- payment modal ---------------- */
   async function paymentModal(loan, { settle = false } = {}) {
-    const methods = GFS.PAYMENT_METHODS;
-    const amount = settle ? loan.settlement.total : (loan.nextDueAmount || loan.installment);
-    const m = UI.modal(`
-      <h3>${settle ? '🎯 Settle loan in full' : '💳 Make a payment'} — ${esc(loan.ref)}</h3>
-      <div class="stat-row" style="grid-template-columns:1fr 1fr 1fr">
-        <div class="kpi"><div class="k-label">Outstanding</div><div class="k-value" style="font-size:17px">${GFS.mk(loan.outstanding)}</div></div>
-        <div class="kpi emerald"><div class="k-label">${settle ? 'Settlement amount' : 'Next instalment'}</div><div class="k-value" style="font-size:17px">${GFS.mk(amount)}</div></div>
-        <div class="kpi blue"><div class="k-label">Future interest waived</div><div class="k-value" style="font-size:17px">${settle ? GFS.mk(loan.settlement.futureInterestWaived) : '—'}</div></div>
-      </div>
-      ${settle ? `<div class="alert alert-success small mt-2">Settling today stops all future interest. Quote valid 7 days.</div>` : ''}
-      <form id="pay-form" class="mt-2">
-        ${!settle ? UI.field('Amount (MWK)', UI.input('amount', `type="number" min="1" step="100" value="${Math.ceil(amount)}" required`), 'Partial and advance payments are welcome.') : `<input type="hidden" name="amount" value="${amount}">`}
-        ${UI.field('Payment method', `<div class="grid grid-2" style="gap:10px">${methods.map((mm, i) => `<label class="doc-tile" style="cursor:pointer"><input type="radio" name="method" value="${mm.id}" ${i === 0 ? 'checked' : ''} style="width:auto"><span style="font-size:20px">${mm.icon}</span><span><b class="small">${esc(mm.name)}</b><div class="tiny muted">${mm.type === 'mobile' ? 'Instant prompt to your phone' : mm.type === 'bank' ? 'FDH / Standard Bank' : 'Receipt at counter'}</div></span></label>`).join('')}</div>`)}
-        ${UI.field('Mobile number / account to debit', UI.input('account', `value="${esc(App.user.phone || '')}" placeholder="0999 123 456"`))}
-        <div class="m-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-gold">${settle ? 'Initiate settlement' : 'Initiate payment'} →</button></div>
-      </form>`, { wide: true });
-
+    const [md, fresh] = await Promise.all([API.get('/api/payment-methods'), API.get('/api/loans/' + loan.id)]);
+    loan = fresh.loan;
+    const q = settle ? (fresh.settlement || loan.settlement) : null;
+    const methods = md.methods.filter(m => m.available !== false);
+    const amount = settle ? q.total : (loan.nextDueAmount || loan.installment);
+    const requestKey = (crypto.randomUUID ? crypto.randomUUID() : 'pay-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+    const m = UI.modal(`<h3>${settle ? 'Settle loan in full' : 'Make a payment'} — ${esc(loan.ref)}</h3>
+      ${md.sandbox ? `<div class="sandbox-note">${UI.icon('flask')} Sandbox payment. No real money will move; you can simulate success or failure.</div>` : ''}
+      <div class="stat-row payment-modal-stats"><div class="kpi"><div class="k-label">Outstanding</div><div class="k-value">${GFS.mk(loan.totalOutstanding ?? loan.outstanding ?? 0)}</div></div><div class="kpi emerald"><div class="k-label">${settle ? 'Settlement today' : 'Next instalment'}</div><div class="k-value">${GFS.mk2(amount)}</div></div><div class="kpi blue"><div class="k-label">${settle ? 'Future interest waived' : 'Loan status'}</div><div class="k-value">${settle ? GFS.mk(q.futureInterestWaived) : esc(loan.status)}</div></div></div>
+      ${settle ? `<div class="alert alert-info small mt-2">Quote valid today only (${esc(q.asOf || GFS.iso(new Date()))}). Interest accrues daily; future unaccrued interest is waived. No early-settlement penalty.</div>` : ''}
+      <form id="pay-form" class="mt-2">${!settle ? UI.field('Amount (MWK)', UI.input('amount', `type="number" min="1" step="0.01" value="${amount}" required`), 'Partial and advance payments are accepted. Amounts above the payoff require early settlement.') : `<input type="hidden" name="amount" value="${amount}">`}
+        ${UI.field('Payment method', `<div class="payment-options">${methods.map((mm, i) => `<label class="payment-option"><input type="radio" name="method" value="${mm.id}" ${i === 0 ? 'checked' : ''} ${mm.available === false ? 'disabled' : ''}><span class="po-icon">${UI.icon(mm.type === 'mobile' ? 'phone' : mm.type === 'bank' ? 'home' : 'wallet')}</span><span><b>${esc(mm.name)}</b><small>${mm.mode === 'sandbox' ? 'Sandbox simulation' : mm.mode === 'gateway' ? 'Provider gateway' : mm.type === 'bank' ? 'Transfer + reconciliation' : 'Branch cashier record'}</small></span></label>`).join('')}</div>`)}
+        ${UI.field('Mobile number / account', UI.input('account', `value="${esc(App.user.phone || '')}" placeholder="0999 123 456"`))}
+        <div class="m-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-gold">${settle ? 'Create settlement payment' : 'Continue to payment'} ${UI.icon('arrow')}</button></div></form>`, { wide: true });
     UI.bindForm(m.el.querySelector('#pay-form'), async data => {
-      const idem = 'pay-' + loan.id + '-' + Date.now();
-      const r = await API.post('/api/payments/initiate', { loanId: loan.id, amount: Number(data.amount), method: data.method, account: data.account, settle, idempotencyKey: idem });
-      const t = r.payment;
-      const mm = methods.find(x => x.id === data.method);
-      m.el.innerHTML = `
-        <h3>📲 Confirm your payment</h3>
-        <div class="alert alert-info">${esc(r.instructions || mm.instructions)}</div>
-        ${UI.table(['Item', 'Detail'], [['Reference', `<span class="mono">${esc(t.ref)}</span>`], ['Amount', `<b>${GFS.mk(t.amount)}</b>`], ['Method', esc(mm.name)], ['Status', UI.badge(t.status)]])}
-        ${r.sandbox ? `<div class="demo-box mt-2"><b>Sandbox payment rail.</b> In production the provider (TNM/Airtel/bank) confirms this payment via a signed webhook and your balance updates automatically. Here you can simulate the outcome:</div>` : ''}
-        <div class="m-actions">
-          <button class="btn btn-ghost" data-close>Close</button>
-          ${r.sandbox ? `<button class="btn btn-danger" id="sim-fail">Simulate failure</button><button class="btn btn-emerald" id="sim-ok">✓ I completed the payment</button>` : `<button class="btn btn-emerald" id="check-status">Check status</button>`}
-        </div>`;
+      const r = await API.post('/api/payments/initiate', { loanId: loan.id, amount: Number(data.amount), method: data.method, account: data.account, settle, quoteDate: q?.asOf, idempotencyKey: requestKey });
+      const t = r.payment, mm = methods.find(x => x.id === data.method);
+      m.el.innerHTML = `<h3>${r.sandbox ? 'Sandbox payment ready' : 'Payment reference created'}</h3><div class="alert ${r.sandbox ? 'alert-warn' : 'alert-info'}">${esc(r.instructions || 'Keep this reference. Your balance changes only after verification.')}</div>
+        ${UI.table(['Item', 'Detail'], [['Reference', `<span class="mono">${esc(t.ref)}</span>`], ['Amount', `<b>${GFS.mk2(t.amount)}</b>`], ['Method', esc(mm?.name || t.method)], ['Status', UI.badge(t.status)]])}
+        ${!r.sandbox && ['bank', 'cash'].includes(t.method) ? `<form id="proof-form" class="mt-2">${UI.field('Bank transfer / cashier receipt reference', UI.input('providerReference', 'required maxlength="150" placeholder="Reference from your bank or cashier'))}<button class="btn btn-ghost btn-sm" type="submit">Submit for reconciliation</button><p class="hint">Submitting a claim does not verify payment or change your balance.</p></form>` : ''}
+        <div class="m-actions"><button class="btn btn-ghost" data-close>Close</button>${r.sandbox ? `<button class="btn btn-danger" id="sim-fail">Simulate failure</button><button class="btn btn-emerald" id="sim-ok">Simulate successful payment</button>` : `<button class="btn btn-emerald" id="check-status">Check status</button>`}</div>`;
+      const proof = m.el.querySelector('#proof-form'); if (proof) UI.bindForm(proof, async d => { const pr = await API.post(`/api/payments/${t.id}/proof`, d); UI.toast(pr.message); });
       const finish = async outcome => {
-        const c = await API.post(`/api/payments/${t.id}/confirm`, { outcome });
-        if (c.failed) {
-          m.el.innerHTML = `<div class="center"><div style="font-size:44px">⚠️</div><h3>Payment not completed</h3><p class="muted small">${esc(c.payment.failureReason || 'The payment did not go through. No money was deducted.')}</p><div class="m-actions" style="justify-content:center"><button class="btn btn-ghost" data-close>Close</button><button class="btn btn-gold" id="retry">Try again</button></div></div>`;
-          m.el.querySelector('#retry').onclick = () => { m.close(); paymentModal(loan, { settle }); };
-          return;
-        }
-        m.el.innerHTML = `<div class="center"><div style="font-size:48px">✅</div><h2>Payment verified!</h2>
-          <p class="muted">${GFS.mk(c.payment.amount)} received via ${esc(mm.name)}.</p>
-          <div class="card" style="text-align:left">${UI.table(['Item', 'Detail'], [
-            ['Receipt', `<b class="mono">${esc(c.receipt.ref)}</b>`],
-            ['Principal paid', GFS.mk(c.allocation.principal)], ['Interest paid', GFS.mk(c.allocation.interest)],
-            ...(c.allocation.penalties ? [['Penalties paid', GFS.mk(c.allocation.penalties)]] : []),
-            ['New outstanding balance', `<b>${GFS.mk(c.loan.outstanding)}</b>`],
-            ['Loan status', UI.badge(c.loan.status)]])}</div>
-          <div class="m-actions" style="justify-content:center"><button class="btn btn-ghost" id="rcpt">🧾 Download receipt</button><button class="btn btn-gold" data-close>Done</button></div></div>`;
+        const c = await API.post(`/api/payments/${t.id}/confirm`, { outcome, simulate: true });
+        if (c.failed) { m.el.innerHTML = `<div class="center"><span class="result-icon error">${UI.icon('alert')}</span><h3>Payment not completed</h3><p class="muted">${esc(c.payment.failureReason || 'Sandbox payment cancelled. No money moved.')}</p><div class="m-actions" style="justify-content:center"><button class="btn btn-ghost" data-close>Close</button><button class="btn btn-gold" id="retry">Try again</button></div></div>`; m.el.querySelector('#retry').onclick = () => { m.close(); paymentModal(loan, { settle }); }; return; }
+        m.el.innerHTML = `<div class="center"><span class="result-icon success">${UI.icon('check')}</span><h2>${c.sandbox ? 'Sandbox payment verified' : 'Payment verified'}</h2><p class="muted">${c.sandbox ? 'No real money moved. ' : ''}${GFS.mk2(c.payment.amount)} recorded via ${esc(mm?.name || t.method)}.</p><div class="card left">${UI.table(['Item', 'Detail'], [['Receipt', `<b class="mono">${esc(c.receipt.ref)}</b>`], ['Principal paid', GFS.mk2(c.allocation.principal)], ['Interest paid', GFS.mk2(c.allocation.interest)], ['New outstanding', `<b>${GFS.mk2(c.loan.totalOutstanding ?? c.loan.outstanding ?? 0)}</b>`], ['Loan status', UI.badge(c.loan.status)]])}</div><div class="m-actions" style="justify-content:center"><button class="btn btn-ghost" id="rcpt">${UI.icon('download')} Receipt</button><button class="btn btn-gold" data-close>Done</button></div></div>`;
         m.el.querySelector('#rcpt').onclick = () => API.download(`/api/receipts/${c.receipt.id}/pdf`, `${c.receipt.ref}.pdf`).catch(e => UI.toast(e.message, 'err'));
-        UI.toast('Balance updated and receipt issued ✓');
-        App.refreshUser();
-        setTimeout(() => App.render(), 600);
+        UI.toast('Balance updated and receipt issued.'); await App.refreshUser(); setTimeout(() => App.render(), 500);
       };
-      const ok = m.el.querySelector('#sim-ok'); if (ok) ok.onclick = () => finish('success');
-      const fail = m.el.querySelector('#sim-fail'); if (fail) fail.onclick = () => finish('failure');
-      const chk = m.el.querySelector('#check-status'); if (chk) chk.onclick = async () => { const d = await API.get('/api/transactions'); const t2 = d.transactions.find(x => x.id === t.id); UI.toast('Status: ' + (t2 ? t2.status : 'unknown')); };
+      m.el.querySelector('#sim-ok')?.addEventListener('click', () => finish('success')); m.el.querySelector('#sim-fail')?.addEventListener('click', () => finish('failure'));
+      m.el.querySelector('#check-status')?.addEventListener('click', async () => { const d = await API.get('/api/transactions'); const t2 = d.transactions.find(x => x.id === t.id); UI.toast('Status: ' + (t2?.status || 'unknown')); });
     });
   }
 
@@ -131,7 +107,7 @@ const Money = (() => {
       const d = await API.get('/api/statements');
       return `<div class="page-head"><div><h1>Financial Statements & Records</h1><div class="sub">Download PDF statements, receipts and agreements — generated from your central record</div></div>
         <button class="btn btn-gold" id="all-tx-pdf">📑 Full transaction statement</button></div>
-        <div class="grid grid-3 mb-2">${[['📑', 'Loan statements', 'Full terms, schedule and transactions per loan'], ['🧾', 'Payment receipts', 'Unique receipt for every verified payment'], ['🎯', 'Settlement statements', 'Early-settlement quote with future interest waived'], ['💰', 'Disbursement confirmations', 'Proof of funds sent, net of fees'], ['✍️', 'Signed agreements', 'Your electronically signed loan agreement'], ['📊', 'Transaction statements', 'Complete money-in / money-out history']].map(([i, t, b]) => `<div class="card"><div style="font-size:24px">${i}</div><h3 style="font-size:15px">${t}</h3><p class="tiny muted mb-0">${b}</p></div>`).join('')}</div>
+        <div class="grid grid-3 mb-2">${[['📑', 'Loan statements', 'Full terms, schedule and transactions per loan'], ['🧾', 'Payment receipts', 'Unique receipt for every verified payment'], ['🎯', 'Settlement statements', 'Early-settlement quote with future interest waived'], ['wallet', 'Disbursement confirmations', 'Recorded net disbursement; sandbox records are labelled'], ['✍️', 'Signed agreements', 'Your electronically signed loan agreement'], ['📊', 'Transaction statements', 'Complete money-in / money-out history']].map(([i, t, b]) => `<div class="card"><div style="font-size:24px">${i}</div><h3 style="font-size:15px">${t}</h3><p class="tiny muted mb-0">${b}</p></div>`).join('')}</div>
         <div class="card"><h3>💰 Per-loan documents</h3>
           ${d.loans.length ? UI.table(['Loan', 'Product', 'Status', 'Outstanding', 'Documents'], d.loans.map(l => [`<span class="mono small">${esc(l.ref)}</span>`, esc((GFS.productById(l.productId) || {}).name || l.productId), UI.badge(l.status), GFS.mk(l.outstanding),
             `<div class="flex wrap"><button class="btn btn-ghost btn-sm" data-stmt="${l.id}">📑 Statement</button><button class="btn btn-ghost btn-sm" data-settle-pdf="${l.id}">🎯 Settlement</button><button class="btn btn-ghost btn-sm" data-disb="${l.id}">💰 Disbursement</button></div>`]), { numCols: [3] }) : UI.empty('📑', 'No loans yet')}
@@ -170,7 +146,7 @@ const Money = (() => {
     },
     mount: async el => {
       const f = el.querySelector('#req-form');
-      const info = { settlement: 'Get a settlement quote — pay principal + accrued interest only; future interest is waived.', topup: 'Borrow extra against an active loan in good standing (up to 50% of original principal, within product limits).', renewal: 'Fast-track a new loan at the same terms once the current one is settled.', restructure: 'Extend the term to reduce your instalment. A credit officer confirms within 2 working days.', refinance: 'Replace the loan with new terms. Subject to assessment.' };
+      const info = { settlement: 'Get a settlement quote — pay principal + accrued interest only; future interest is waived.', topup: 'Borrow extra against an active loan in good standing (up to 50% of original principal, within product limits).', renewal: 'Fast-track a new loan at the same terms once the current one is settled.', restructure: 'Extend the term to reduce your instalment. A credit officer must review and confirm any new terms.', refinance: 'Replace the loan with new terms. Subject to assessment.' };
       const sync = () => { el.querySelector('#req-info').textContent = info[f.elements.type.value] || ''; el.querySelector('#topup-amt').style.display = f.elements.type.value === 'topup' ? '' : 'none'; };
       f.elements.type.addEventListener('change', sync); sync();
       UI.bindForm(f, async data => {

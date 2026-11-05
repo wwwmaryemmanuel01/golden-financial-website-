@@ -1,177 +1,19 @@
-/* Customer registration, login, OTP verification, password reset. */
+/* Registration, challenge-bound OTP verification, sign-in, 2FA and reset. */
 'use strict';
 (() => {
   const esc = UI.esc;
-  const authShell = (title, sub, inner, wide) => `
-    <div class="auth-wrap">
-      <a class="auth-back" href="#/">← Back to website</a>
-      <div class="auth-card" ${wide ? 'style="max-width:620px"' : ''}>
-        <img class="auth-logo" src="assets/logo.png" alt="Golden Financial Services logo">
-        <h2 class="auth-title">${title}</h2><p class="auth-sub">${sub}</p>
-        ${inner}
-      </div>
-      <p style="color:#9DBFB1;font-size:11.5px;margin-top:18px">🔐 Secured by Golden Financial Services · ${GFS.COMPANY.legal}</p>
-    </div>`;
+  const sandbox = () => API.mode === 'local' || App.config?.mode === 'sandbox';
+  const shell = (title, sub, inner, wide = false) => `<div class="auth-layout"><aside class="auth-brand-panel"><a href="#/" class="brand"><img src="assets/logo.png" alt="Golden Financial Services"><span class="brand-wordmark">GOLDEN<span>FINANCIAL SERVICES</span></span></a><div class="auth-brand-copy"><span class="eyebrow light">Your secure customer space</span><h1>Clarity at every step of your financial journey.</h1><p>Apply, track, repay and keep your records together — in Malawi Kwacha.</p><div class="auth-brand-features"><span>${UI.icon('shield')} Protected account access</span><span>${UI.icon('file')} Tracked applications</span><span>${UI.icon('receipt')} Downloadable records</span></div></div><a href="#/" class="auth-back">${UI.icon('arrow')} Back to website</a></aside><main class="auth-form-panel"><div class="auth-card ${wide ? 'wide' : ''}"><img class="auth-mobile-logo" src="assets/logo.png" alt="Golden Financial Services"><h2>${title}</h2><p class="auth-sub">${sub}</p>${sandbox() ? `<div class="sandbox-note">${UI.icon('flask')} Sandbox demonstration — use sample details only. No real money or external verification.</div>` : ''}${inner}</div></main></div>`;
+  const demoBox = () => sandbox() ? `<div class="demo-box"><div><b>Try the sample account</b><span>demo@goldenfinancial.mw · Demo@1234</span></div><button class="btn btn-ghost btn-sm" id="fill-demo" type="button">Fill details</button></div>` : '';
+  const codeBox = code => code ? `<div class="demo-box"><div><b>Sandbox verification code</b><span class="mono">${esc(code)}</span></div><small>No real SMS/email is sent.</small></div>` : '';
+  const getNext = () => { const n = App.query().next; return n && n.startsWith('/') && !n.startsWith('//') ? n : '/portal'; };
+  const store = (key, value) => sessionStorage.setItem(key, JSON.stringify(value));
+  const read = key => { try { return JSON.parse(sessionStorage.getItem(key) || 'null'); } catch { return null; } };
 
-  /* ---------------- 29. REGISTRATION ---------------- */
-  App.route('/register', {
-    title: 'Create Account', layout: 'auth', render: async () => authShell('Create your account', 'Join Golden Financial Services — it takes two minutes', `
-      ${API.mode === 'local' ? '<div class="alert alert-warn small">Device-local demo mode: your account is stored on this device only. Connect the secure backend for a live account.</div>' : ''}
-      <form id="reg-form">
-        <div class="form-grid">
-          ${UI.field('First name', UI.input('firstName', 'required maxlength="60" autocomplete="given-name"'))}
-          ${UI.field('Last name', UI.input('lastName', 'required maxlength="60" autocomplete="family-name"'))}
-        </div>
-        ${UI.field('Email address', UI.input('email', 'type="email" required autocomplete="email" placeholder="you@example.com"'))}
-        ${UI.field('Mobile number', UI.input('phone', 'type="tel" required placeholder="0999 123 456" autocomplete="tel"'), 'TNM or Airtel — we send your verification code here')}
-        <div class="form-grid">
-          ${UI.field('Date of birth', UI.input('dob', 'type="date"'))}
-          ${UI.field('District', UI.select('district', ['', 'Lilongwe', 'Blantyre', 'Mzuzu', 'Zomba', 'Mangochi', 'Kasungu', 'Salima', 'Dedza', 'Ntcheu', 'Mchinji', 'Other'].map(d => [d, d || 'Select…']), ''))}
-        </div>
-        ${UI.field('Password', UI.input('password', 'type="password" required minlength="8" autocomplete="new-password"'), 'At least 8 characters with upper & lower case and a number')}
-        ${UI.field('Confirm password', UI.input('confirmPassword', 'type="password" required autocomplete="new-password"'))}
-        <label class="check"><input type="checkbox" name="acceptTerms" required> I accept the <a href="#/terms" target="_blank">Terms & Conditions</a> and <a href="#/privacy" target="_blank">Privacy Policy</a>, and consent to identity and credit checks.</label>
-        <button class="btn btn-gold btn-block btn-lg" type="submit">Create Account →</button>
-      </form>
-      <p class="auth-alt">Already registered? <a href="#/login">Sign in</a></p>`),
-    mount: async el => {
-      const f = el.querySelector('#reg-form');
-      UI.bindForm(f, async data => {
-        if (data.password !== data.confirmPassword) throw new Error('Passwords do not match.');
-        const d = await API.post('/api/auth/register', data);
-        sessionStorage.setItem('gfs_verify', JSON.stringify({ phone: d.phone, email: d.email, devCodes: d.devCodes || null, name: data.firstName }));
-        UI.toast(`Account ${d.customerNo} created! Verify your phone and email.`);
-        App.go('/verify');
-      });
-    }
-  });
-
-  /* ---------------- verification (email + phone OTP) ---------------- */
-  App.route('/verify', {
-    title: 'Verify Your Account', layout: 'auth', render: async () => {
-      const v = JSON.parse(sessionStorage.getItem('gfs_verify') || 'null');
-      if (!v) { App.go('/register'); return ''; }
-      return authShell('Verify your account', `We sent codes to your phone and email, ${esc(v.name || '')}`, `
-        ${v.devCodes ? `<div class="demo-box"><b>Development mode codes</b> (delivered by SMS/email in production):<br>📱 Phone: <b class="mono">${v.devCodes.phone}</b> · ✉️ Email: <b class="mono">${v.devCodes.email}</b><br><span class="tiny">Also saved in Notifications → SMS/Email history.</span></div>` : ''}
-        <form id="phone-form" class="mb-2">
-          ${UI.field(`Phone code (sent to ${esc(v.phone)})`, UI.input('code', 'class="otp-input" maxlength="6" inputmode="numeric" placeholder="••••••" required'))}
-          <input type="hidden" name="purpose" value="verify_phone"><input type="hidden" name="target" value="${esc(v.phone)}">
-          <button class="btn btn-emerald btn-block" type="submit">Verify Phone</button>
-          <button class="btn-link" type="button" id="resend-phone">Resend phone code</button>
-        </form>
-        <hr class="divider">
-        <form id="email-form">
-          ${UI.field(`Email code (sent to ${esc(v.email)})`, UI.input('code', 'class="otp-input" maxlength="6" inputmode="numeric" placeholder="••••••" required'))}
-          <input type="hidden" name="purpose" value="verify_email"><input type="hidden" name="target" value="${esc(v.email)}">
-          <button class="btn btn-emerald btn-block" type="submit">Verify Email</button>
-          <button class="btn-link" type="button" id="resend-email">Resend email code</button>
-        </form>
-        <p class="auth-alt"><a href="#/login">Continue to sign in →</a></p>`);
-    },
-    mount: async el => {
-      const v = JSON.parse(sessionStorage.getItem('gfs_verify') || '{}');
-      const bind = (id, purpose) => {
-        const f = el.querySelector(id);
-        UI.bindForm(f, async data => {
-          const d = await API.post('/api/auth/verify-otp', data);
-          UI.toast(purpose === 'verify_phone' ? 'Phone verified ✓' : 'Email verified ✓');
-          f.querySelector('button[type=submit]').textContent = 'Verified ✓'; f.querySelector('button[type=submit]').disabled = true;
-          if (d.user) { App.user = d.user; }
-        });
-      };
-      bind('#phone-form', 'verify_phone'); bind('#email-form', 'verify_email');
-      const resend = async (purpose, target) => { const d = await API.post('/api/auth/resend-otp', { purpose, target }); UI.toast(d.devCode ? `New code: ${d.devCode} (dev mode)` : 'New code sent.'); };
-      el.querySelector('#resend-phone').onclick = () => resend('verify_phone', v.phone);
-      el.querySelector('#resend-email').onclick = () => resend('verify_email', v.email);
-    }
-  });
-
-  /* ---------------- 30. LOGIN ---------------- */
-  App.route('/login', {
-    title: 'Sign In', layout: 'auth', render: async () => authShell('Welcome back', 'Sign in to your customer portal', `
-      ${API.mode === 'server' ? `<div class="demo-box"><b>Try the demo account</b><br>Email: <b>demo@goldenfinancial.mw</b> · Password: <b>Demo@1234</b><br><button class="btn-link" id="fill-demo" type="button">Fill demo credentials →</button></div>` : `<div class="demo-box"><b>Device-local demo</b> — Email: <b>demo@goldenfinancial.mw</b> · Password: <b>Demo@1234</b> <button class="btn-link" id="fill-demo" type="button">Fill →</button></div>`}
-      <form id="login-form">
-        ${UI.field('Email or phone number', UI.input('email', 'required autocomplete="username" placeholder="you@example.com or 0999…"'))}
-        ${UI.field('Password', UI.input('password', 'type="password" required autocomplete="current-password"'))}
-        <div class="flex-between mb-2"><label class="check" style="margin:0"><input type="checkbox" name="remember" checked> Keep me signed in</label><a href="#/forgot-password" class="small">Forgot password?</a></div>
-        <button class="btn btn-gold btn-block btn-lg" type="submit">Sign In →</button>
-      </form>
-      <p class="auth-alt">New to Golden? <a href="#/register">Create an account</a></p>`),
-    mount: async el => {
-      const f = el.querySelector('#login-form');
-      const fd = el.querySelector('#fill-demo');
-      if (fd) fd.onclick = () => { f.elements.email.value = 'demo@goldenfinancial.mw'; f.elements.password.value = 'Demo@1234'; };
-      UI.bindForm(f, async data => {
-        const d = await API.post('/api/auth/login', data);
-        if (d.twofaRequired) {
-          sessionStorage.setItem('gfs_2fa', JSON.stringify({ target: d.target, devCode: d.devCode || null }));
-          App.go('/login-2fa'); return;
-        }
-        API.setToken(d.token); App.user = d.user;
-        UI.toast(`Welcome back, ${d.user.firstName}!`);
-        const next = App.query().next;
-        App.go(next && next.startsWith('/portal') ? next : '/portal');
-      });
-    }
-  });
-
-  /* ---------------- two-factor ---------------- */
-  App.route('/login-2fa', {
-    title: 'Two-Factor Authentication', layout: 'auth', render: async () => {
-      const t = JSON.parse(sessionStorage.getItem('gfs_2fa') || 'null');
-      if (!t) { App.go('/login'); return ''; }
-      return authShell('Two-factor authentication', `Enter the code sent to ${esc(t.target)}`, `
-        ${t.devCode ? `<div class="demo-box">Dev code: <b class="mono">${t.devCode}</b></div>` : ''}
-        <form id="twofa-form">
-          ${UI.field('Authentication code', UI.input('code', 'class="otp-input" maxlength="6" inputmode="numeric" required'))}
-          <input type="hidden" name="purpose" value="login_2fa"><input type="hidden" name="target" value="${esc(t.target)}">
-          <button class="btn btn-gold btn-block btn-lg" type="submit">Verify & Sign In</button>
-        </form>`);
-    },
-    mount: async el => {
-      UI.bindForm(el.querySelector('#twofa-form'), async data => {
-        const d = await API.post('/api/auth/verify-otp', data);
-        API.setToken(d.token); App.user = d.user; sessionStorage.removeItem('gfs_2fa');
-        UI.toast('Signed in securely ✓'); App.go('/portal');
-      });
-    }
-  });
-
-  /* ---------------- forgot / reset password ---------------- */
-  App.route('/forgot-password', {
-    title: 'Forgot Password', layout: 'auth', render: async () => authShell('Reset your password', 'Enter your email and we will send a reset code', `
-      <form id="forgot-form">
-        ${UI.field('Email address', UI.input('email', 'type="email" required placeholder="you@example.com"'))}
-        <button class="btn btn-gold btn-block" type="submit">Send Reset Code</button>
-      </form><p class="auth-alt"><a href="#/login">← Back to sign in</a></p>`),
-    mount: async el => {
-      UI.bindForm(el.querySelector('#forgot-form'), async data => {
-        const d = await API.post('/api/auth/forgot-password', data);
-        sessionStorage.setItem('gfs_reset', JSON.stringify({ email: data.email, devCode: d.devCode || null }));
-        UI.toast('If the account exists, a reset code has been sent.'); App.go('/reset-password');
-      });
-    }
-  });
-  App.route('/reset-password', {
-    title: 'Reset Password', layout: 'auth', render: async () => {
-      const r = JSON.parse(sessionStorage.getItem('gfs_reset') || '{}');
-      return authShell('Choose a new password', 'Enter the code we sent and your new password', `
-        ${r.devCode ? `<div class="demo-box">Dev reset code: <b class="mono">${r.devCode}</b></div>` : ''}
-        <form id="reset-form">
-          ${UI.field('Email', UI.input('email', `type="email" required value="${esc(r.email || '')}"`))}
-          ${UI.field('Reset code', UI.input('code', 'class="otp-input" maxlength="6" inputmode="numeric" required'))}
-          ${UI.field('New password', UI.input('password', 'type="password" required minlength="8"'))}
-          ${UI.field('Confirm new password', UI.input('confirm', 'type="password" required'))}
-          <button class="btn btn-gold btn-block" type="submit">Reset Password</button>
-        </form><p class="auth-alt"><a href="#/login">← Back to sign in</a></p>`);
-    },
-    mount: async el => {
-      UI.bindForm(el.querySelector('#reset-form'), async data => {
-        if (data.password !== data.confirm) throw new Error('Passwords do not match.');
-        await API.post('/api/auth/reset-password', data);
-        sessionStorage.removeItem('gfs_reset');
-        UI.toast('Password reset ✓ Please sign in.'); App.go('/login');
-      });
-    }
-  });
+  App.route('/register', { title: 'Create account', layout: 'auth', render: async () => shell('Create your account', 'Start with your details, then verify your phone and email.', `<form id="reg-form"><div class="form-grid">${UI.field('First name', UI.input('firstName', 'required maxlength="60" autocomplete="given-name"'))}${UI.field('Last name', UI.input('lastName', 'required maxlength="60" autocomplete="family-name"'))}</div>${UI.field('Email address', UI.input('email', 'type="email" required autocomplete="email" placeholder="you@example.com"'))}${UI.field('Malawi mobile number', UI.input('phone', 'type="tel" required autocomplete="tel" placeholder="0999 123 456"'), 'Used for account verification and security codes.')}${UI.field('Password', UI.input('password', 'type="password" required minlength="8" autocomplete="new-password"'), 'At least 8 characters, upper and lower case, and a number.')}${UI.field('Confirm password', UI.input('confirmPassword', 'type="password" required autocomplete="new-password"'))}<label class="check"><input type="checkbox" name="acceptTerms" required><span>I accept the <a href="#/terms" target="_blank" rel="noopener">Terms</a> and <a href="#/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span></label><button class="btn btn-gold btn-block btn-lg" type="submit">Create account ${UI.icon('arrow')}</button></form><p class="auth-alt">Already registered? <a href="#/login?next=${encodeURIComponent(getNext())}">Sign in</a></p>`, true), mount: el => { UI.bindForm(el.querySelector('#reg-form'), async data => { if (data.password !== data.confirmPassword) throw new Error('Passwords do not match.'); const d = await API.post('/api/auth/register', data); store('gfs_verify', { phone: d.phone, email: d.email, challenges: d.challenges, devCodes: d.devCodes || null, name: data.firstName, next: getNext() }); UI.toast(`Account ${d.customerNo} created. Verify your contact details.`); App.go('/verify'); }); } });
+  App.route('/verify', { title: 'Verify account', layout: 'auth', render: async () => { const v = read('gfs_verify'); if (!v) { App.go('/register'); return ''; } return shell('Verify your account', `Enter the separate codes for ${esc(v.phone)} and ${esc(v.email)}.`, `${v.devCodes ? `<div class="demo-box"><div><b>Sandbox codes</b><span>Phone: <b class="mono">${esc(v.devCodes.phone)}</b> · Email: <b class="mono">${esc(v.devCodes.email)}</b></span></div><small>No real messages are sent.</small></div>` : ''}<form id="phone-form" class="verify-block"><h3>${UI.icon('phone')} Phone verification</h3>${UI.field('Six-digit phone code', UI.input('code', 'class="otp-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" required'))}<button class="btn btn-emerald btn-block" type="submit">Verify phone</button></form><form id="email-form" class="verify-block"><h3>${UI.icon('mail')} Email verification</h3>${UI.field('Six-digit email code', UI.input('code', 'class="otp-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" required'))}<button class="btn btn-emerald btn-block" type="submit">Verify email</button></form><p class="hint">Need a new code? Sign in and use Profile → Contact verification.</p><p class="auth-alt"><a href="#/login?next=${encodeURIComponent(v.next || '/portal')}">Continue to sign in ${UI.icon('arrow')}</a></p>`); }, mount: el => { const v = read('gfs_verify') || {}; const bind = (selector, purpose) => { const form = el.querySelector(selector); UI.bindForm(form, async data => { const d = await API.post('/api/auth/verify-otp', { purpose, code: data.code, challenge: v.challenges?.[purpose === 'verify_phone' ? 'phone' : 'email'] }); UI.toast(purpose === 'verify_phone' ? 'Phone verified.' : 'Email verified.'); form.querySelector('button[type=submit]').textContent = 'Verified'; form.querySelector('button[type=submit]').disabled = true; if (d.user && App.user) App.user = d.user; }); }; bind('#phone-form', 'verify_phone'); bind('#email-form', 'verify_email'); } });
+  App.route('/login', { title: 'Sign in', layout: 'auth', render: async () => shell('Welcome back', 'Sign in to your Golden customer portal.', `${demoBox()}<form id="login-form">${UI.field('Email or phone number', UI.input('email', 'required autocomplete="username" placeholder="you@example.com or 0999…"'))}${UI.field('Password', UI.input('password', 'type="password" required autocomplete="current-password"'))}<div class="flex-between mb-2"><span class="hint">${UI.icon('lock')} Session expires after inactivity.</span><a href="#/forgot-password" class="small">Forgot password?</a></div><button class="btn btn-gold btn-block btn-lg" type="submit">Sign in ${UI.icon('arrow')}</button></form><p class="auth-alt">New to Golden? <a href="#/register?next=${encodeURIComponent(getNext())}">Create an account</a></p>`), mount: el => { const form = el.querySelector('#login-form'); el.querySelector('#fill-demo')?.addEventListener('click', () => { form.elements.email.value = 'demo@goldenfinancial.mw'; form.elements.password.value = 'Demo@1234'; }); UI.bindForm(form, async data => { const d = await API.post('/api/auth/login', data); if (d.twofaRequired) { store('gfs_2fa', { challenge: d.challenge, loginChallenge: d.loginChallenge, maskedPhone: d.maskedPhone, devCode: d.devCode || null, next: getNext() }); App.go('/login-2fa'); return; } API.setToken(d.token); App.user = d.user; await App.refreshUser(); UI.toast(`Welcome back, ${d.user.firstName}.`); App.go(getNext()); }); } });
+  App.route('/login-2fa', { title: 'Two-factor sign-in', layout: 'auth', render: async () => { const t = read('gfs_2fa'); if (!t) { App.go('/login'); return ''; } return shell('Two-factor authentication', `Enter the code sent to ${esc(t.maskedPhone || 'your verified phone')}.`, `${codeBox(t.devCode)}<form id="twofa-form">${UI.field('Authentication code', UI.input('code', 'class="otp-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" required'))}<button class="btn btn-gold btn-block btn-lg" type="submit">Verify & sign in</button></form><p class="auth-alt"><a href="#/login">Use a different account</a></p>`); }, mount: el => { const t = read('gfs_2fa') || {}; UI.bindForm(el.querySelector('#twofa-form'), async data => { const d = await API.post('/api/auth/verify-otp', { purpose: 'login_2fa', code: data.code, challenge: t.challenge, loginChallenge: t.loginChallenge }); API.setToken(d.token); App.user = d.user; sessionStorage.removeItem('gfs_2fa'); await App.refreshUser(); App.go(t.next || '/portal'); }); } });
+  App.route('/forgot-password', { title: 'Forgot password', layout: 'auth', render: async () => shell('Reset your password', 'Enter your email address. If an eligible account exists, we’ll send a reset code.', `<form id="forgot-form">${UI.field('Email address', UI.input('email', 'type="email" required autocomplete="email" placeholder="you@example.com"'))}<button class="btn btn-gold btn-block" type="submit">Send reset code ${UI.icon('arrow')}</button></form><p class="auth-alt"><a href="#/login">Back to sign in</a></p>`), mount: el => { UI.bindForm(el.querySelector('#forgot-form'), async data => { const d = await API.post('/api/auth/forgot-password', data); store('gfs_reset', { email: data.email, challenge: d.challenge, devCode: d.devCode || null }); UI.toast(d.message || 'If the account exists, a reset code has been sent.'); App.go('/reset-password'); }); } });
+  App.route('/reset-password', { title: 'Reset password', layout: 'auth', render: async () => { const r = read('gfs_reset') || {}; return shell('Choose a new password', 'Enter your reset code and a strong new password.', `${codeBox(r.devCode)}<form id="reset-form">${UI.field('Reset code', UI.input('code', 'class="otp-input" maxlength="6" inputmode="numeric" required'))}${UI.field('New password', UI.input('password', 'type="password" required minlength="8" autocomplete="new-password"'))}${UI.field('Confirm new password', UI.input('confirm', 'type="password" required autocomplete="new-password"'))}<button class="btn btn-gold btn-block" type="submit">Reset password</button></form><p class="auth-alt"><a href="#/login">Back to sign in</a></p>`); }, mount: el => { const r = read('gfs_reset') || {}; UI.bindForm(el.querySelector('#reset-form'), async data => { if (!r.challenge) throw new Error('Request a reset code first.'); if (data.password !== data.confirm) throw new Error('Passwords do not match.'); await API.post('/api/auth/reset-password', { challenge: r.challenge, code: data.code, password: data.password }); sessionStorage.removeItem('gfs_reset'); UI.toast('Password reset. Please sign in again.'); App.go('/login'); }); } });
 })();

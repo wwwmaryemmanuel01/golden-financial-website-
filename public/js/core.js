@@ -80,6 +80,8 @@
     periodsPerYear: { monthly: 12, fortnightly: 26, weekly: 52, daily: 365 }
   };
 
+  const GFS_DEFAULT_RULES = Object.freeze({ ...RULES });
+
   /* ---------------- money & numbers ---------------- */
   const round2 = v => Math.round((Number(v) + Number.EPSILON) * 100) / 100;
   const mk = v => 'MK ' + (Number(v) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
@@ -98,16 +100,16 @@
      Declining-balance (reducing) interest, equal instalments (annuity).
      Period rate = nominal monthly rate × 12 ÷ periods per year.
      Arrangement fee is a % of principal, deducted at disbursement. */
-  function periodRate(monthlyPct, freq) {
-    const ppy = RULES.periodsPerYear[freq] || 12;
+  function periodRate(monthlyPct, freq, config = RULES) {
+    const ppy = config.periodsPerYear[freq] || 12;
     return (monthlyPct / 100) * 12 / ppy;
   }
-  function periodsFor(termMonths, freq) {
-    const ppy = RULES.periodsPerYear[freq] || 12;
+  function periodsFor(termMonths, freq, config = RULES) {
+    const ppy = config.periodsPerYear[freq] || 12;
     return Math.max(1, Math.round(termMonths * ppy / 12));
   }
-  function instalmentFor(principal, monthlyPct, termMonths, freq) {
-    const r = periodRate(monthlyPct, freq), n = periodsFor(termMonths, freq);
+  function instalmentFor(principal, monthlyPct, termMonths, freq, config = RULES) {
+    const r = periodRate(monthlyPct, freq, config), n = periodsFor(termMonths, freq, config);
     if (r === 0) return round2(principal / n);
     return round2(principal * r / (1 - Math.pow(1 + r, -n)));
   }
@@ -119,9 +121,9 @@
     return addDays(s, i + 1); // daily
   }
   /* Full amortisation schedule. Returns rows + summary. */
-  function amortize({ amount, monthlyPct, termMonths, freq = 'monthly', feePct = 0, startDate = new Date() }) {
-    const P = Number(amount), r = periodRate(monthlyPct, freq), n = periodsFor(termMonths, freq);
-    const inst = instalmentFor(P, monthlyPct, termMonths, freq);
+  function amortize({ amount, monthlyPct, termMonths, freq = 'monthly', feePct = 0, startDate = new Date(), rules = RULES }) {
+    const P = Number(amount), r = periodRate(monthlyPct, freq, rules), n = periodsFor(termMonths, freq, rules);
+    const inst = instalmentFor(P, monthlyPct, termMonths, freq, rules);
     const fee = round2(P * feePct / 100);
     let bal = P, totalInt = 0;
     const rows = [];
@@ -144,17 +146,18 @@
       fee, netDisbursement: round2(P - fee), totalInterest: totalInt, totalRepayable: totalRepay,
       totalCost: round2(totalInt + fee), startDate: iso(startDate), endDate: rows.length ? rows[rows.length - 1].dueDate : iso(startDate),
       equivalents: {
-        monthly: round2(inst * (RULES.periodsPerYear[freq] || 12) / 12),
-        weekly: round2(inst * (RULES.periodsPerYear[freq] || 12) / 52),
-        daily: round2(inst * (RULES.periodsPerYear[freq] || 12) / 365)
+        monthly: round2(inst * (rules.periodsPerYear[freq] || 12) / 12),
+        weekly: round2(inst * (rules.periodsPerYear[freq] || 12) / 52),
+        daily: round2(inst * (rules.periodsPerYear[freq] || 12) / 365)
       },
       rows
     };
   }
 
   /* ---------------- eligibility (automated assessment) ---------------- */
-  function assess({ product, amount, termMonths, freq = 'monthly', income = 0, expenses = 0, existingObligations = 0, activeLoans = 0, exposure = 0, age = 30, kycVerified = false, guarantors = 0, collateralValue = 0 }) {
-    const p = typeof product === 'string' ? productById(product) : product;
+  function assess({ product, amount, termMonths, freq = 'monthly', income = 0, expenses = 0, existingObligations = 0, activeLoans = 0, exposure = 0, age = 30, kycVerified = false, guarantors = 0, collateralValue = 0 }, options = {}) {
+    const RULES = { ...GFS_DEFAULT_RULES, ...(options.rules || {}) };
+    const p = options.product || (typeof product === 'string' ? productById(product) : product);
     const reasons = [], warnings = [];
     if (!p) return { eligible: false, score: 0, reasons: ['Unknown loan product.'], warnings };
     if (amount < p.min) reasons.push(`Amount is below the ${p.name} minimum of ${mk(p.min)}.`);
@@ -166,13 +169,13 @@
     if (exposure + amount > RULES.maxExposure) reasons.push(`Total exposure would exceed the ${mk(RULES.maxExposure)} customer limit.`);
     if (guarantors < p.guarantors) reasons.push(`${p.name} requires ${p.guarantors} guarantor(s); ${guarantors} provided.`);
     if (p.collateral && amount > 2000000 && collateralValue < amount * 0.8) reasons.push(`Collateral valued at ≥ 80% of the amount is required above MK 2,000,000 (provided ${mk(collateralValue)}).`);
-    const q = amortize({ amount, monthlyPct: p.rate, termMonths, freq, feePct: p.fee });
+    const q = amortize({ amount, monthlyPct: p.rate, termMonths, freq, feePct: p.fee, rules: RULES });
     const monthlyInst = q.equivalents.monthly;
     const net = Math.max(0, income - expenses);
     const capacity = round2(net * RULES.affordabilityCap - existingObligations);
     const dti = income > 0 ? round2((monthlyInst + existingObligations) / income * 100) : 100;
     if (income <= 0) reasons.push('Monthly income is required for the affordability assessment.');
-    else if (monthlyInst > capacity) reasons.push(`Instalment ${mk(monthlyInst)}/month exceeds your affordability capacity of ${mk(Math.max(0, capacity))} (40% of net income less existing obligations).`);
+    else if (monthlyInst > capacity) reasons.push(`Instalment ${mk(monthlyInst)}/month exceeds your affordability capacity of ${mk(Math.max(0, capacity))} (${Math.round(RULES.affordabilityCap * 100)}% of net income less existing obligations).`);
     if (!kycVerified) warnings.push('Identity verification (KYC) is not complete — approval is conditional on document verification.');
     let score = 100;
     score -= reasons.length * 25;
@@ -247,9 +250,9 @@
 
   /* ---------------- payment rails (mirrors admin payments module) ---------------- */
   const PAYMENT_METHODS = [
-    { id: 'mpamba',  name: 'TNM Mpamba',     type: 'mobile',  merchant: 'GFS-MPAMBA-001', instructions: 'Dial *444#, choose Pay Bill → Golden Financial Services, enter your loan reference as the account number.', icon: '📱', colour: '#0E9F6E' },
-    { id: 'airtel',  name: 'Airtel Money',   type: 'mobile',  merchant: 'GFS-AIRTEL-001', instructions: 'Dial *211#, choose Make Payments → Golden Financial Services, enter your loan reference as the reference.', icon: '📲', colour: '#DC2626' },
-    { id: 'bank',    name: 'Bank Transfer',  type: 'bank',    merchant: 'FDH Bank · 1000234567 · Standard Bank · 9000123456', instructions: 'Transfer to Golden Financial Services Ltd, FDH Bank acc 1000234567 (or Standard Bank 9000123456). Use your loan reference as the payment reference.', icon: '🏦', colour: '#2F6FED' },
+    { id: 'mpamba',  name: 'TNM Mpamba',     type: 'mobile',  merchant: '', instructions: 'Use the TNM Mpamba pay-bill details confirmed by your branch or the payment request in your portal. Always quote your unique payment reference.', icon: '📱', colour: '#0E9F6E' },
+    { id: 'airtel',  name: 'Airtel Money',   type: 'mobile',  merchant: '', instructions: 'Use the Airtel Money merchant details confirmed by your branch or the payment request in your portal. Always quote your unique payment reference.', icon: '📲', colour: '#DC2626' },
+    { id: 'bank',    name: 'Bank Transfer',  type: 'bank',    merchant: '', instructions: 'Request verified bank account details from your branch before transferring. Use your unique payment reference and submit the transfer reference for reconciliation.', icon: '🏦', colour: '#2F6FED' },
     { id: 'cash',    name: 'Cash at Branch', type: 'cash',    merchant: 'Any GFS branch', instructions: 'Pay at any branch cashier and quote your loan reference. A printed receipt is issued immediately.', icon: '💵', colour: '#C9A227' }
   ];
 
@@ -300,7 +303,7 @@
     { q: 'How long does approval take?', a: 'Complete applications with verified documents are assessed automatically and most decisions are issued within 24 hours. Manual referrals may take up to 3 working days.' },
     { q: 'What interest rate will I pay?', a: 'Rates depend on the product: from 1.8% per month (mortgages) to 4.0% (emergency loans), charged on the declining balance. Your exact rate is shown in the calculator and in your offer before you accept.' },
     { q: 'What fees are charged?', a: 'A one-off arrangement fee of 1.0%–2.5% of the principal (by product) is deducted at disbursement. Late payments attract 2% of the overdue instalment per month after a 3-day grace period. There are no hidden charges.' },
-    { q: 'How do I repay?', a: 'Pay from your portal with TNM Mpamba, Airtel Money, bank transfer (FDH or Standard Bank) or cash at any branch. Every verified payment updates your balance immediately and issues a receipt.' },
+    { q: 'How do I repay?', a: 'Pay from your portal with TNM Mpamba, Airtel Money, bank transfer or cash at any branch using verified provider details. Every verified payment updates your balance immediately and issues a receipt.' },
     { q: 'Can I repay early?', a: 'Yes. Request a settlement statement in your portal — you pay only the outstanding principal plus interest accrued to that date. All future interest is waived.' },
     { q: 'What documents do I need?', a: 'A national ID, passport or driving licence; proof of income (payslip or statements); and product-specific documents such as a quotation, admission letter or medical report. Upload them securely in your portal.' },
     { q: 'Do I need a guarantor or collateral?', a: 'Most products need one guarantor. Business loans above MK 2,000,000, asset financing and mortgages require security. Salary advance loans need no guarantor.' },

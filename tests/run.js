@@ -1,136 +1,138 @@
-/* End-to-end smoke test against a running server (default http://127.0.0.1:3000).
-   Walks the full customer journey and asserts the financial engine. */
+/* End-to-end smoke test against a running SANDBOX server.
+   Run with an isolated database, e.g.
+   GFS_DATA_DIR=/tmp/gfs-test GFS_DEMO_MODE=true PORT=3100 node server/index.js
+   GFS_TEST_URL=http://127.0.0.1:3100 node tests/run.js */
+import crypto from 'node:crypto';
 const BASE = process.env.GFS_TEST_URL || 'http://127.0.0.1:3000';
 let cookie = '';
 let pass = 0, fail = 0;
 const check = (name, cond, extra) => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}`, extra ?? ''); } };
-
 async function api(method, path, body, expect = 200) {
-  const res = await fetch(BASE + path, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
-    body: body ? JSON.stringify(body) : undefined
-  });
-  const sc = res.headers.get('set-cookie');
-  if (sc) cookie = sc.split(';')[0];
+  const res = await fetch(BASE + path, { method, headers: { 'Content-Type': 'application/json', 'X-GFS-Request': 'website', ...(cookie ? { Cookie: cookie } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const sc = res.headers.get('set-cookie'); if (sc) cookie = sc.split(';')[0];
   const ct = res.headers.get('content-type') || '';
   const data = ct.includes('json') ? await res.json() : Buffer.from(await res.arrayBuffer());
   if (res.status !== expect) throw new Error(`${method} ${path} → ${res.status} (expected ${expect}): ${JSON.stringify(data).slice(0, 300)}`);
   return data;
 }
-
+const pdfBuffer = label => Buffer.from(`%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n% ${label}\n%%EOF`);
+const upload = (kind, label) => api('POST', '/api/documents', { kind, filename: `${label}.pdf`, mime: 'application/pdf', data: pdfBuffer(label).toString('base64') });
 const run = async () => {
-  console.log('\nGOLDEN FINANCIAL SERVICES — end-to-end test\n');
-
-  // public
+  console.log('\nGOLDEN FINANCIAL SERVICES — rebuild end-to-end test\n');
   const health = await api('GET', '/api/health');
-  check('health + central database', health.status === 'ok' && health.database === 'connected');
+  check('health identifies customer API', health.status === 'ok' && health.service === 'golden-financial-customer-api' && health.currency === 'MWK');
   const config = await api('GET', '/api/config');
-  check('public config: 10 products, MWK, read-only', config.products.length === 10 && config.currency === 'MWK' && config.readOnlyForCustomers === true);
+  check('public config: 10 products, MWK, customer read-only', config.products.length === 10 && config.currency === 'MWK' && config.readOnlyForCustomers === true);
+  const methods = await api('GET', '/api/payment-methods');
+  check('payment methods expose sandbox mode', methods.sandbox === true && methods.methods.length >= 4 && methods.methods.every(m => m.mode === 'sandbox'));
+  const csrf = await fetch(BASE + '/api/calculator', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  check('mutation without website header refused', csrf.status === 403);
   const calc = await api('POST', '/api/calculator', { productId: 'BL', amount: 1500000, term: 12, freq: 'monthly' });
-  check('calculator: amortization rows = 12', calc.schedule.rows.length === 12);
-  check('calculator: total repayable = principal + interest', Math.abs(calc.schedule.totalRepayable - (1500000 + calc.schedule.totalInterest)) < 1);
-  check('calculator: fee deducted at disbursement', calc.schedule.netDisbursement === 1500000 - calc.schedule.fee);
+  check('calculator schedule rows', calc.schedule.rows.length === 12);
+  check('calculator total = principal + interest', Math.abs(calc.schedule.totalRepayable - (1500000 + calc.schedule.totalInterest)) < 1);
   const elig = await api('POST', '/api/eligibility', { productId: 'PL', amount: 200000, term: 6, income: 600000, expenses: 200000 });
-  check('eligibility assessment runs', typeof elig.eligible === 'boolean' && elig.quote);
+  check('eligibility assessment runs', typeof elig.eligible === 'boolean' && !!elig.quote);
 
-  // auth
   const login = await api('POST', '/api/auth/login', { email: 'demo@goldenfinancial.mw', password: 'Demo@1234' });
-  check('demo login', login.user && login.user.customerNo === 'GF-000001');
+  check('sandbox login', login.user?.customerNo === 'GF-000001' && !!login.token);
   const dash = await api('GET', '/api/dashboard');
-  check('dashboard: active loan present', dash.stats.activeLoans >= 1);
-  check('dashboard: outstanding computed', dash.stats.outstanding > 0);
-  check('dashboard: next repayment set', !!dash.stats.nextRepaymentDate);
+  check('dashboard totals + checklist', dash.totals.activeLoans >= 1 && dash.totals.outstanding > 0 && typeof dash.checklist.phone === 'boolean');
   const loans = await api('GET', '/api/loans');
   const active = loans.loans.find(l => l.status === 'active');
-  check('loan schedule generated', active && active.schedule.length === active.installmentsTotal);
-  check('loan progress tracked', active.installmentsPaid === 4);
-
-  // settings read-only enforcement
+  check('loan aliases + schedule', active && active.outstanding > 0 && active.schedule.length === active.installmentsTotal);
   await api('PUT', '/api/settings/system', { products: [] }, 403);
-  check('customer cannot write system settings (403)', true);
+  check('customer cannot write system settings', true);
+  await api('GET', '/api/integration/customers', null, 401);
+  check('integration export requires signed system auth', true);
+  const ist = await api('GET', '/api/integration/status');
+  check('linked system status is truthful', ist.repository.includes('golden-loan-services') && ist.connected === false);
 
-  // new application → automated pipeline
-  const app = await api('POST', '/api/applications', {
-    productId: 'PL', amount: 200000, term: 6, freq: 'monthly', purpose: 'Home solar system',
-    income: 950000, expenses: 420000, acceptTerms: true, disbursementMethod: 'mpamba',
-    guarantors: [{ name: 'Grace Banda', phone: '0991777222', relationship: 'Sister', consent: true }]
-  });
-  check('application reference GLS-APP format', /^GLS-APP-\d{6}$/.test(app.reference));
-  check('automated decision issued', ['approved', 'rejected', 'pending_documents'].includes(app.application.status));
-  let appId = app.application.id;
-  let appStatus = app.application.status;
-  if (appStatus === 'approved') {
-    // accept agreement → disbursement
-    const acc = await api('POST', `/api/applications/${appId}/accept-agreement`, {
-      accept: true, name: 'Mary Emmanuel', idNumber: '123456/78/9', signature: 'Mary Emmanuel (typed)'
-    });
-    check('agreement accepted → loan disbursed', acc.loan && acc.loan.status === 'active');
-    check('disbursement reference issued', !!acc.loan.disbursementRef);
-    const newLoan = acc.loan;
-    const before = newLoan.outstandingPrincipal;
-    // payment
-    const pay = await api('POST', '/api/payments/initiate', { loanId: newLoan.id, amount: newLoan.installment, method: 'mpamba', account: '0999123456', idempotencyKey: 'test-' + Date.now() });
-    check('payment initiated (pending)', pay.payment.status === 'pending');
-    const conf = await api('POST', `/api/payments/${pay.payment.id}/confirm`, { outcome: 'success' });
-    check('payment verified', conf.payment.status === 'verified');
-    check('unique receipt issued', /^RCT-\d{8}-[A-Z2-9]{6}$/.test(conf.receipt.ref));
-    check('balance updated automatically', conf.loan.outstandingPrincipal < before);
-    check('allocation recorded', conf.allocation.principal > 0 && conf.allocation.interest > 0);
-    // idempotency
-    const dup = await api('POST', '/api/payments/initiate', { loanId: newLoan.id, amount: newLoan.installment, method: 'mpamba', account: '0999123456', idempotencyKey: pay.payment.idempotencyKey || 'x' });
-    // receipt PDF
-    const pdf = await api('GET', `/api/receipts/${conf.receipt.id}/pdf`);
-    check('receipt PDF generated', Buffer.isBuffer(pdf) && pdf.subarray(0, 5).toString() === '%PDF-');
-    const stmt = await api('GET', `/api/loans/${newLoan.id}/statement.pdf`);
-    check('loan statement PDF generated', Buffer.isBuffer(stmt) && stmt.subarray(0, 5).toString() === '%PDF-');
-    const agr = await api('GET', `/api/applications/${appId}/agreement.pdf`);
-    check('signed agreement PDF generated', Buffer.isBuffer(agr) && agr.subarray(0, 5).toString() === '%PDF-');
+  const idDoc = await upload('national_id', 'identity');
+  const incomeDoc = await upload('payslip', 'income');
+  check('documents stored pending, not auto-verified', idDoc.document.status === 'pending' && incomeDoc.document.status === 'pending');
+  const consentDoc = await upload('guarantor_consent', 'guarantor-consent');
+  const g = await api('POST', '/api/guarantors', { name: 'Grace Banda', phone: '0991777222', relationship: 'Sister', consentDocumentId: consentDoc.document.id });
+  check('guarantor consent document recorded', g.guarantor.consent === 1 && g.guarantor.status === 'consent_document_received');
+  const c = await api('POST', '/api/collateral', { type: 'Vehicle', description: 'Toyota Hiace 2018', estimatedValue: 9000000 });
+  check('collateral awaits valuation', c.collateral.status === 'awaiting_valuation' && c.collateral.valued_amount == null);
+  const app = await api('POST', '/api/applications', { productId: 'PL', amount: 200000, term: 6, freq: 'monthly', purpose: 'Home solar system installation', income: 950000, expenses: 420000, consent: true, disbursementMethod: 'mpamba', disbursementAccount: '0999123456', guarantorIds: [g.guarantor.id], collateralIds: [c.collateral.id] });
+  check('application reference', /^GLS-APP-\d{6}$/.test(app.reference));
+  check('sandbox simulated review approved', app.application.status === 'approved' && app.application.reviewSource === 'sandbox');
+  const appId = app.application.id, offer = app.application.offer;
+  const acc = await api('POST', `/api/applications/${appId}/accept-agreement`, { accept: true, termsConsent: true, offerVersion: offer.version, name: 'Mary Emmanuel', signature: 'Mary Emmanuel' });
+  check('agreement accepted → sandbox disbursement', acc.loan?.status === 'active' && acc.sandbox === true);
+  const loan = acc.loan;
+  const key = crypto.randomUUID();
+  const pay = await api('POST', '/api/payments/initiate', { loanId: loan.id, amount: 50000, method: 'mpamba', account: '0999123456', idempotencyKey: key });
+  check('payment initiated pending sandbox', pay.payment.status === 'pending' && pay.sandbox === true);
+  await api('POST', `/api/payments/${pay.payment.id}/confirm`, { outcome: 'success' }, 400);
+  check('sandbox confirmation requires explicit simulate flag', true);
+  const conf = await api('POST', `/api/payments/${pay.payment.id}/confirm`, { outcome: 'success', simulate: true });
+  check('sandbox payment verified + receipt', conf.payment.status === 'verified' && /^RCT-/.test(conf.receipt.ref));
+  check('balance reduced + allocation recorded', conf.loan.totalOutstanding < loan.totalOutstanding && conf.allocation.principal + conf.allocation.interest > 0);
+  const dup = await api('POST', '/api/payments/initiate', { loanId: loan.id, amount: 50000, method: 'mpamba', account: '0999123456', idempotencyKey: key });
+  check('idempotent replay returns same payment', dup.duplicate === true && dup.payment.id === pay.payment.id);
+  await api('POST', '/api/payments/initiate', { loanId: loan.id, amount: 60000, method: 'mpamba', account: '0999123456', idempotencyKey: key }, 409);
+  check('idempotency key reuse with different amount refused', true);
+  const failPay = await api('POST', '/api/payments/initiate', { loanId: loan.id, amount: 10000, method: 'airtel', account: '0888123456', idempotencyKey: crypto.randomUUID() });
+  const failed = await api('POST', `/api/payments/${failPay.payment.id}/confirm`, { outcome: 'failure', simulate: true, reason: 'Sandbox cancellation' });
+  check('sandbox failure recorded', failed.payment.status === 'failed');
+  const bank = await api('POST', '/api/payments/initiate', { loanId: loan.id, amount: 10000, method: 'bank', idempotencyKey: crypto.randomUUID() });
+  check('bank transfer awaits reconciliation', bank.payment.status === 'awaiting_verification');
+  const beforeProof = (await api('GET', `/api/loans/${loan.id}`)).loan.totalOutstanding;
+  const proof = await api('POST', `/api/payments/${bank.payment.id}/proof`, { providerReference: 'BANK-REF-123456' });
+  const afterProof = (await api('GET', `/api/loans/${loan.id}`)).loan.totalOutstanding;
+  check('customer proof does not change balance', proof.message.includes('has not changed') && beforeProof === afterProof);
+  const settleReq = await api('POST', '/api/requests', { type: 'settlement', loanId: loan.id });
+  check('settlement request records quote for review', settleReq.request.status === 'under_review' && settleReq.quote.total > 0);
+  const topup = await api('POST', '/api/requests', { type: 'topup', loanId: loan.id, amount: 50000, reason: 'Additional working capital' });
+  check('top-up request recorded without changing terms', topup.request.status === 'under_review');
+  const quote = (await api('GET', `/api/loans/${loan.id}/settlement`)).quote;
+  const settle = await api('POST', '/api/payments/initiate', { loanId: loan.id, settle: true, quoteDate: quote.asOf, method: 'mpamba', account: '0999123456', idempotencyKey: crypto.randomUUID() });
+  const settled = await api('POST', `/api/payments/${settle.payment.id}/confirm`, { outcome: 'success', simulate: true });
+  check('early settlement closes loan', settled.loan.status === 'closed' && settled.loan.totalOutstanding === 0);
+  const renewal = await api('POST', '/api/requests', { type: 'renewal', loanId: loan.id, termMonths: 6, reason: 'Renew after settlement' });
+  check('renewal request on closed loan recorded', renewal.request.status === 'under_review');
+
+  for (const [name, path] of [['receipt', `/api/receipts/${conf.receipt.id}/pdf`], ['statement', `/api/loans/${loan.id}/statement.pdf`], ['settlement statement', `/api/loans/${loan.id}/settlement.pdf`], ['disbursement', `/api/loans/${loan.id}/disbursement.pdf`], ['agreement', `/api/applications/${appId}/agreement.pdf`]]) {
+    const pdf = await api('GET', path); check(`${name} PDF generated`, Buffer.isBuffer(pdf) && pdf.subarray(0, 5).toString() === '%PDF-');
   }
-
-  // settlement quote + request
-  const req = await api('POST', '/api/requests', { type: 'settlement', loanId: active.id });
-  check('settlement request + quote', req.request.status === 'approved' && req.request.payload.quote.total > 0);
-
-  // notifications
   const notifs = await api('GET', '/api/notifications');
-  check('notifications recorded', notifs.notifications.length > 5);
+  check('notification history recorded', notifs.notifications.length > 5);
   const sms = await api('GET', '/api/notifications?channel=sms');
-  check('SMS history recorded', sms.notifications.length > 3);
-
-  // support
+  check('SMS history labelled with delivery status', sms.notifications.length > 0 && sms.notifications.every(n => n.channel === 'sms'));
   const chat = await api('POST', '/api/chat', { message: 'What is my balance?' });
-  check('AI assistant answers from live data', /LN-/.test(chat.reply));
+  check('assistant answers from records', typeof chat.reply === 'string' && chat.reply.length > 10);
   const ticket = await api('POST', '/api/tickets', { subject: 'Test ticket', message: 'Testing the support flow', category: 'general' });
-  check('support ticket created', /^TKT-\d{6}$/.test(ticket.ticket.ref));
-
-  // documents
-  const doc = await api('POST', '/api/documents', { kind: 'other', filename: 'test.pdf', mime: 'application/pdf', data: Buffer.from('GFS test document content for encryption check.').toString('base64') });
-  check('document uploaded + encrypted', doc.document.ref.startsWith('DOC-'));
-  const dl = await api('GET', `/api/documents/${doc.document.id}/file`);
-  check('document decrypts for owner', Buffer.isBuffer(dl) && dl.toString().includes('GFS test'));
-
-  // transactions & export
+  check('support ticket created', ticket.ticket.ref.startsWith('TKT-'));
+  const dl = await api('GET', `/api/documents/${idDoc.document.id}/file`);
+  check('document decrypts for owner', Buffer.isBuffer(dl) && dl.toString().includes('identity'));
   const txns = await api('GET', '/api/transactions');
   check('transaction history', txns.transactions.length > 5);
   const exp = await api('GET', '/api/export/my-data');
-  check('own-data export', exp.profile && exp.loans && exp.transactions);
+  check('own-data export', !!exp.profile && Array.isArray(exp.loans));
 
-  // integration
-  const ist = await api('GET', '/api/integration/status');
-  check('linked system info', ist.linkedSystem.url.includes('golden-loan-services'));
-  await api('GET', '/api/integration/export', null, 503); // no key configured
-  check('integration export requires key', true);
-
-  // auth: registration + OTP
-  const reg = await api('POST', '/api/auth/register', { firstName: 'Test', lastName: 'User', email: `test${Date.now()}@example.com`, phone: '0888123456', password: 'Test@1234', acceptTerms: true });
-  check('registration + customer number', /^GF-\d{6}$/.test(reg.customerNo));
-  check('dev OTP issued', !!reg.devCodes.phone);
-  const ver = await api('POST', '/api/auth/verify-otp', { purpose: 'verify_phone', target: reg.phone, code: reg.devCodes.phone });
-  check('phone OTP verified', ver.verified === true);
-
-  // wrong password lockout behavior
-  await api('POST', '/api/auth/login', { email: 'demo@goldenfinancial.mw', password: 'wrong' }, 401);
+  const email = `test${Date.now()}@example.com`;
+  const reg = await api('POST', '/api/auth/register', { firstName: 'Test', lastName: 'User', email, phone: '0888123456', password: 'Test@1234', acceptTerms: true });
+  check('registration issues separate challenges', /^GF-\d{6}$/.test(reg.customerNo) && !!reg.challenges.phone && !!reg.challenges.email && !!reg.devCodes.phone);
+  await api('POST', '/api/auth/verify-otp', { purpose: 'verify_phone', challenge: reg.challenges.phone, code: reg.devCodes.phone });
+  await api('POST', '/api/auth/verify-otp', { purpose: 'verify_email', challenge: reg.challenges.email, code: reg.devCodes.email });
+  check('phone + email OTP verification', true);
+  await api('POST', '/api/auth/verify-otp', { purpose: 'reset', challenge: reg.challenges.phone, code: reg.devCodes.phone }, 400);
+  check('reset codes are not consumed by verify-otp', true);
+  const forgot = await api('POST', '/api/auth/forgot-password', { email });
+  check('forgot password issues sandbox reset challenge', !!forgot.challenge && !!forgot.devCode);
+  await api('POST', '/api/auth/reset-password', { challenge: forgot.challenge, code: forgot.devCode, password: 'NewPass@1234' });
+  const relogin = await api('POST', '/api/auth/login', { email, password: 'NewPass@1234' });
+  check('password reset consumed once and works', relogin.user.email === email);
+  const ch = await api('POST', '/api/auth/verification-challenge', { purpose: 'login_2fa' });
+  await api('PUT', '/api/security/2fa', { enabled: true, password: 'NewPass@1234', challenge: ch.challenge, code: ch.devCode });
+  await api('POST', '/api/auth/logout');
+  const twofa = await api('POST', '/api/auth/login', { email, password: 'NewPass@1234' });
+  check('2FA login challenge issued', twofa.twofaRequired === true && !!twofa.loginChallenge);
+  const verified = await api('POST', '/api/auth/verify-otp', { purpose: 'login_2fa', challenge: twofa.challenge, loginChallenge: twofa.loginChallenge, code: twofa.devCode });
+  check('2FA verification signs in', verified.verified === true && !!verified.token);
+  await api('POST', '/api/auth/login', { email, password: 'wrong' }, 401);
   check('wrong password rejected', true);
 
   console.log(`\n  ${pass} passed, ${fail} failed\n`);

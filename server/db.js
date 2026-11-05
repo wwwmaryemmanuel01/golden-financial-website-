@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
   ip TEXT, user_agent TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  last_seen TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
   expires_at TEXT NOT NULL,
   revoked INTEGER NOT NULL DEFAULT 0
 );
@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS loans (
   credit_balance REAL NOT NULL DEFAULT 0,
   total_repaid REAL NOT NULL DEFAULT 0,
   total_interest_paid REAL NOT NULL DEFAULT 0,
+  total_principal_paid REAL NOT NULL DEFAULT 0,
   total_fees_paid REAL NOT NULL DEFAULT 0,
   total_penalties_paid REAL NOT NULL DEFAULT 0,
   next_due_date TEXT, next_due_amount REAL,
@@ -334,4 +335,4 @@ export function activity(customerId, action, detail, ip, ua) {
   run(`INSERT INTO activity_log(customer_id, action, detail, ip, user_agent) VALUES(?,?,?,?,?)`,
     customerId, action, detail ?? null, ip ?? null, ua ?? null);
 }
-export const json = (s, fallback = {}) => { try { return JSON.parse(s); } catch { return fallback; } };
+export const json = (s, fallback = {}) => { try { const v = JSON.parse(s); return v == null ? fallback : v; } catch { return fallback; } };
