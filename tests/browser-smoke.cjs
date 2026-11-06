@@ -37,6 +37,7 @@ const assert = (condition, message) => { if (!condition) throw new Error(message
 async function exercisePublic(window, label) {
   const d = window.document;
   await nav(window, '#/blog');
+  assert(d.querySelectorAll('#blog-results .journal-card[data-card-motion]').length >= 6, label + ': journal cards need motion attributes');
   const total = d.querySelectorAll('#blog-results .journal-card').length;
   assert(total >= 6, label + ': blog cards missing');
   const search = d.querySelector('#blog-search'); search.value = 'salary'; search.dispatchEvent(new window.Event('input', { bubbles: true }));
@@ -67,6 +68,24 @@ async function exercisePublic(window, label) {
   await nav(window, '#/calculator');
   const cf = d.querySelector('#calc-form');
   assert(cf.elements.ratePct.value === '1' && cf.elements.feePct.value === '5' && cf.elements.termMonths.value === '1' && cf.elements.paymentFrequency.value === 'annually', label + ': calculator defaults missing');
+  // The result sheet must carry real payment dates, not only a count of payments.
+  cf.elements.termMonths.value = '6'; cf.elements.paymentFrequency.value = 'monthly';
+  cf.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await sleep(600);
+  const dates = [...d.querySelectorAll('.date-list li')];
+  assert(dates.length === 6, label + ': result sheet payment-date list missing (' + dates.length + ')');
+  assert(dates.every(li => /\d{2} \w{3} \d{4}/.test(li.querySelector('.dl-date').textContent)), label + ': payment dates are not formatted dates');
+  const scheduleFact = [...d.querySelectorAll('.calc-breakdown div')].find(x => x.querySelector('dt').textContent.includes('Payment schedule'));
+  assert(/\d{2} \w{3} \d{4}/.test(scheduleFact.querySelector('dd').textContent), label + ': schedule summary has no dates');
+  assert([...d.querySelectorAll('.calc-breakdown dt')].some(x => x.textContent === 'First payment date'), label + ': first payment date missing');
+  await nav(window, '#/');
+  const liveCards = [...d.querySelectorAll('.live-card')];
+  assert(liveCards.length >= 1, label + ': live band cards missing');
+  assert(liveCards.every(c => c.querySelector('img[src^="assets/live/"]')), label + ': live cards need images');
+  assert(liveCards.every(c => c.dataset.cardMotion), label + ': live cards need an animation');
+  assert(d.querySelector('[data-live-pause]'), label + ': live rotation pause control missing');
+  assert(d.querySelector('.live-source a[href*="website.html#s3"]'), label + ': live band must link to admin publishing settings');
+  assert(d.querySelectorAll('.glance-item').length >= 4, label + ': lending-at-a-glance figures missing');
   await nav(window, '#/announcements');
   assert(d.querySelector('.notice-card a[href^="#/announcements/"]'), label + ': announcement detail link missing');
   assert(d.querySelector('.notice-source a[href*="website.html#s3"]'), label + ': admin publishing settings link missing');

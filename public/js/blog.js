@@ -42,7 +42,28 @@ const Experience = (() => {
     });
   }
   const syncBookmarks = () => { const value = read(BOOKMARK_KEY, []); bookmarks.clear(); if (Array.isArray(value)) value.filter(x => typeof x === 'string').forEach(x => bookmarks.add(x)); };
-  return { controls, bindControls, reveal, toggleBookmark, paintBookmarks, syncBookmarks, bookmarks, get motion() { return motion; } };
+  /* Cards keep the same content but pick a new animation automatically, so the
+     library feels alive without every card doing the same thing. */
+  const MOTION_POOL = ['tilt', 'spin', 'swap', 'flap', 'flip', 'rotate', 'breathe', 'twinkle'];
+  const motionCyclers = new WeakMap();
+  function stopAutoMotion(root) { const timer = motionCyclers.get(root); if (timer) { clearInterval(timer); motionCyclers.delete(root); } }
+  function autoMotion(root, { selector = '[data-card-motion]', every = 6000 } = {}) {
+    stopAutoMotion(root);
+    if (!root) return () => {};
+    const cycle = () => {
+      if (motion === 'off' || media.matches || document.visibilityState !== 'visible') return;
+      root.querySelectorAll(selector).forEach(el => {
+        const current = el.dataset.cardMotion;
+        let next = MOTION_POOL[Math.floor(Math.random() * MOTION_POOL.length)];
+        if (next === current) next = MOTION_POOL[(MOTION_POOL.indexOf(current) + 1) % MOTION_POOL.length];
+        el.dataset.cardMotion = next;
+      });
+    };
+    const timer = setInterval(cycle, every);
+    motionCyclers.set(root, timer);
+    return () => stopAutoMotion(root);
+  }
+  return { controls, bindControls, reveal, toggleBookmark, paintBookmarks, syncBookmarks, bookmarks, motions: MOTION_POOL, autoMotion, stopAutoMotion, get motion() { return motion; } };
 })();
 
 const Blog = (() => {
@@ -109,6 +130,7 @@ const Blog = (() => {
           root.querySelector('#blog-saved').setAttribute('aria-pressed', String(state.saved));
           root.querySelectorAll('[data-category]').forEach(b => { const active = b.dataset.category === state.category; b.classList.toggle('active', active); b.setAttribute('aria-pressed', String(active)); });
           Experience.paintBookmarks(root); Experience.reveal(results, signal);
+          Experience.autoMotion(results, { selector: '.journal-card', every: 6000 });
           results.querySelector('#empty-clear')?.addEventListener('click', clear, { signal });
         };
         const updateStatus = () => { status.textContent = `${sourceLabel(state.source)} · ${state.checkedAt ? 'checked ' + new Date(state.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'available offline'}`; };
@@ -142,7 +164,7 @@ const Blog = (() => {
         document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state.source === 'backend') load(); }, { signal });
         Experience.bindControls(root, signal); Experience.paintBookmarks(root); paint(); updateStatus();
         poll = setInterval(() => { if (state.source === 'backend' && document.visibilityState === 'visible') load(); }, 60000);
-        return () => { controller.abort(); clearInterval(poll); };
+        return () => { controller.abort(); clearInterval(poll); Experience.stopAutoMotion(results); };
       } };
   } });
 
