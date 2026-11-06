@@ -81,7 +81,7 @@
     maxLoginAttempts: 5,
     lockoutMinutes: 15,
     allocationOrder: ['penalties', 'fees', 'interest', 'principal'],
-    periodsPerYear: { monthly: 12, fortnightly: 26, weekly: 52, daily: 365 }
+    periodsPerYear: { annually: 1, monthly: 12, fortnightly: 26, weekly: 52, daily: 365 }
   };
 
   const GFS_DEFAULT_RULES = Object.freeze({ ...RULES });
@@ -119,6 +119,7 @@
   }
   function nextDueDate(start, freq, i) {
     const s = new Date(start);
+    if (freq === 'annually') return addMonths(s, 12 * (i + 1));
     if (freq === 'monthly') return addMonths(s, i + 1);
     if (freq === 'fortnightly') return addDays(s, 14 * (i + 1));
     if (freq === 'weekly') return addDays(s, 7 * (i + 1));
@@ -156,6 +157,57 @@
       },
       rows
     };
+  }
+
+  /* Planning calculator. This is deliberately separate from the signed-loan
+     engine: customers can compare flat and reducing illustrations without
+     changing product pricing or an existing agreement. The processing fee is
+     deducted once at disbursement, never added twice to scheduled repayments. */
+  const CALCULATOR_DEFAULTS = Object.freeze({ productId: 'PL', amount: 100000, ratePct: 1, ratePeriod: 'monthly', feePct: 5, termMonths: 1, paymentFrequency: 'annually', method: 'reducing' });
+  const FREQUENCY_LABELS = Object.freeze({ annually: 'Annually · every 1 year', monthly: 'Monthly', fortnightly: 'Every 2 weeks', weekly: 'Weekly', daily: 'Daily' });
+  function quoteLoan(input = {}, options = {}) {
+    const b = { ...CALCULATOR_DEFAULTS, ...input }, products = options.products || PRODUCTS;
+    const product = products.find(p => p.id === b.productId);
+    const P = Number(b.amount), rate = Number(b.ratePct), feePct = Number(b.feePct), term = Number(b.termMonths);
+    const fail = message => { const e = new Error(message); e.status = 400; throw e; };
+    if (!product) fail('Choose one of the five published loan products.');
+    if (!Number.isFinite(P) || P <= 0 || P > 1e12) fail('Enter a principal greater than zero and no more than MK 1 trillion.');
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) fail('Interest must be between 0% and 100%.');
+    if (!Number.isFinite(feePct) || feePct < 0 || feePct > 100) fail('Processing fee must be between 0% and 100%.');
+    if (!Number.isInteger(term) || term < 1 || term > 360) fail('Duration must be a whole number from 1 to 360 months.');
+    if (!['flat', 'reducing'].includes(b.method)) fail('Choose flat or reducing-balance interest.');
+    if (!['monthly', 'annual'].includes(b.ratePeriod)) fail('Choose a monthly or annual interest-rate basis.');
+    if (!Object.hasOwn(RULES.periodsPerYear, b.paymentFrequency)) fail('Choose a supported payment frequency.');
+    const monthlyRate = (rate / 100) / (b.ratePeriod === 'annual' ? 12 : 1);
+    const ppy = RULES.periodsPerYear[b.paymentFrequency], monthsPerPeriod = 12 / ppy;
+    // Daily/weekly/fortnightly periods use exact day intervals. A final stub
+    // never extends the loan beyond its requested maturity. Annual payments on
+    // a one-month loan produce ONE maturity payment, not a twelve-month loan.
+    const start = new Date(b.startDate || new Date());
+    if (!Number.isFinite(start.getTime())) fail('Choose a valid disbursement date.');
+    const maturity = iso(addMonths(start, term)), n = Math.max(1, Math.ceil(term / monthsPerPeriod));
+    const fullPeriodRate = monthlyRate * monthsPerPeriod, fee = round2(P * feePct / 100);
+    const annuity = fullPeriodRate === 0 ? P / n : P * fullPeriodRate / (1 - Math.pow(1 + fullPeriodRate, -n));
+    const flatInterest = round2(P * monthlyRate * term), flatPrincipal = round2(P / n);
+    let balance = P, totalInterest = 0, totalPrincipal = 0;
+    const rows = [];
+    for (let i = 0; i < n; i++) {
+      let due = iso(nextDueDate(start, b.paymentFrequency, i));
+      if (due > maturity || i === n - 1) due = maturity;
+      const previous = i ? rows[i - 1].dueDate : iso(start);
+      const fraction = ['monthly', 'annually'].includes(b.paymentFrequency) ? Math.min(1, Math.max(0, (new Date(due).getUTCFullYear() - new Date(previous).getUTCFullYear()) * 12 + new Date(due).getUTCMonth() - new Date(previous).getUTCMonth()) / monthsPerPeriod) : Math.min(1, daysBetween(previous, due) * ppy / 365);
+      const interest = b.method === 'flat' ? (i === n - 1 ? round2(flatInterest - totalInterest) : round2(flatInterest / n)) : round2(balance * fullPeriodRate * fraction);
+      let principal = b.method === 'flat' ? (i === n - 1 ? round2(P - totalPrincipal) : flatPrincipal) : (i === n - 1 ? balance : round2(Math.min(balance, annuity - interest)));
+      principal = Math.max(0, principal);
+      const opening = balance; balance = round2(balance - principal);
+      totalInterest = round2(totalInterest + interest); totalPrincipal = round2(totalPrincipal + principal);
+      rows.push({ no: i + 1, dueDate: due, opening, installment: round2(principal + interest), principal, interest, closing: Math.max(0, balance), status: 'pending', paid: 0 });
+    }
+    const totalRepayable = round2(P + totalInterest);
+    return { productId: product.id, productName: product.label || product.name, principal: P, ratePct: rate, ratePeriod: b.ratePeriod, monthlyPct: round2(monthlyRate * 100), feePct, fee, totalFees: fee, method: b.method, freq: b.paymentFrequency, paymentFrequency: b.paymentFrequency, termMonths: term, periods: n, installment: rows[0].installment, finalInstallment: rows[n - 1].installment, netDisbursement: round2(P - fee), totalInterest, totalRepayable, totalCost: round2(totalInterest + fee), startDate: iso(start), endDate: maturity, rows,
+      formula: b.method === 'flat' ? 'Flat interest = principal × monthly rate × duration in months. Interest is calculated on the original principal.' : 'Reducing interest = outstanding principal × period rate. Equal-payment annuity with a final rounding/stub adjustment.',
+      feeTreatment: 'Processing fee is deducted once from disbursement. Total repayment excludes that upfront fee; total cost includes it.',
+      frequencyNote: monthsPerPeriod > term ? `The ${term}-month term is shorter than the selected payment interval: one repayment is due at maturity.` : 'The final payment is adjusted to the exact maturity date and to clear rounding.' };
   }
 
   /* ---------------- eligibility (automated assessment) ---------------- */
@@ -328,7 +380,7 @@
 
   return {
     CURRENCY, CATALOG_VERSION, RULES, PRODUCTS, ARCHIVED_PRODUCTS, PAYMENT_METHODS, BRANCHES, COMPANY, AGREEMENT_CLAUSES, FAQS, TESTIMONIALS,
-    productById, productByName, periodRate, periodsFor, instalmentFor, amortize, assess, allocate, settlementQuote,
+    productById, productByName, periodRate, periodsFor, instalmentFor, amortize, quoteLoan, CALCULATOR_DEFAULTS, FREQUENCY_LABELS, assess, allocate, settlementQuote,
     round2, mk, mk2, num, iso, addMonths, addDays, daysBetween, fmtDate, fmtDateTime, refs,
     isEmail, isPhoneMW, normPhone, passwordIssues
   };

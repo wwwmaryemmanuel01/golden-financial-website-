@@ -12,6 +12,7 @@ import * as support from './support.js';
 import * as statements from './statements.js';
 import * as integration from './integration.js';
 import * as content from './content.js';
+import * as accountActivity from './account-activity.js';
 import { listNotifications, unreadCount, markRead, markAllRead } from './notifications.js';
 import GFS from '../shared/core.mjs';
 
@@ -28,6 +29,7 @@ router.get('/api/branches', async () => ({ branches: getSetting('branches', GFS.
 router.get('/api/faqs', async () => ({ faqs: GFS.FAQS }));
 router.get('/api/testimonials', async () => ({ testimonials: GFS.TESTIMONIALS }));
 router.get('/api/announcements', support.listAnnouncements);
+router.get('/api/account-activity', accountActivity.listAccountActivity);
 router.get('/api/agreement-clauses', async () => ({ clauses: GFS.AGREEMENT_CLAUSES }));
 router.post('/api/calculator', loans.calculator);
 router.get('/api/calculator', loans.calculator);
@@ -138,7 +140,8 @@ router.get('/api/export/my-data', async ctx => {
     receipts: q(`SELECT * FROM receipts WHERE customer_id = ?`, u.id),
     notifications: q(`SELECT * FROM notifications WHERE customer_id = ?`, u.id),
     documents: q(`SELECT id, ref, kind, filename, status, uploaded_at FROM documents WHERE customer_id = ?`, u.id),
-    activity: q(`SELECT * FROM activity_log WHERE customer_id = ?`, u.id)
+    activity: q(`SELECT * FROM activity_log WHERE customer_id = ?`, u.id),
+    accountActivity: q(`SELECT * FROM account_activities WHERE customer_id = ?`, u.id)
   };
 });
 

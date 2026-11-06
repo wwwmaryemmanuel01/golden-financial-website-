@@ -12,7 +12,7 @@ JSON unless noted (PDF). Authenticated endpoints use the session cookie or
 | GET | `/api/products` · `/api/branches` · `/api/faqs` · `/api/testimonials` · `/api/announcements` · `/api/agreement-clauses` | Public content; products are exactly the five active categories |
 | GET | `/api/blog/posts` | Published article summaries; optional `search` and `category`; source label |
 | GET | `/api/blog/posts/:slug` | Article detail, previous/next and related summaries |
-| GET/POST | `/api/calculator` | Amortisation: `{productId, amount, term, freq}`. Explicit unknown/retired product IDs return 400; omitting productId defaults to the first active category. |
+| GET/POST | `/api/calculator` | Quote: `{productId, amount, ratePct, ratePeriod, feePct, termMonths, paymentFrequency, method, startDate}`. Defaults: 1% rate (monthly), 5% fee, 1 month, annual frequency, reducing. `method` is `flat` or `reducing`; returns the result sheet fields and a dated schedule. Explicit unknown/retired product IDs return 400. |
 | POST | `/api/eligibility` | Affordability assessment: `{productId, amount, term, income, expenses, guarantors?, collateralValue?}` |
 | GET | `/api/payment-methods` | Rails + instructions |
 | GET | `/api/integration/status` | Linked-system info |
@@ -28,6 +28,12 @@ JSON unless noted (PDF). Authenticated endpoints use the session cookie or
 | POST | `/api/auth/change-password` | `{currentPassword, newPassword}` |
 | POST | `/api/auth/logout` | Revoke session |
 | GET | `/api/me` | Current user |
+
+## Announcements & account activity
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/announcements` | `{announcements, version, checkedAt, source, publishingConfigured, adminSettingsUrl}` — scheduled/expired notices filtered server-side |
+| GET | `/api/account-activity` | Read-only signed-administration activity for the signed-in customer (`?type=&status=&limit=`) |
 
 ## Profile & security
 `PUT /api/profile` · `PUT /api/prefs` · `PUT /api/security/2fa` ·

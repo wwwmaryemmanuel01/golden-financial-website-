@@ -3,7 +3,7 @@
    provider callback can post money to the immutable financial ledger. */
 import crypto from 'node:crypto';
 import { q, q1, run, tx, audit, activity, json } from './db.js';
-import { HttpError, readBody } from './http.js';
+import { HttpError } from './http.js';
 import { clean, verifyWebhookSignature } from './security.js';
 import { notify } from './notifications.js';
 import { requireAuth } from './auth.js';
@@ -53,6 +53,7 @@ export async function initiatePayment(ctx) {
   const instructions = DEMO_MODE ? `Sandbox only: no money will move. Simulate a successful or failed ${method.name} payment to test the receipt and balance workflow.` : method.type === 'mobile' ? `Approve the ${method.name} request on your phone. Your balance updates only after the provider confirms it.` : method.type === 'bank' ? `${method.instructions || 'Obtain verified account details from your branch.'} Quote ${ref}. A reconciliation officer must verify the transfer.` : `Visit a branch and quote ${ref}. Only a verified cashier record updates your balance.`;
   const id = Number(run(`INSERT INTO transactions(ref,customer_id,loan_id,type,method,provider,provider_ref,amount,status,idempotency_key,request_hash,meta,environment) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ref, u.id, loan.id, settle ? 'settlement' : 'repayment', method.id, method.name, providerRef, amount, liveMobile ? 'submitting' : method.type === 'mobile' ? 'pending' : 'awaiting_verification', key, fingerprint, JSON.stringify({ account, settle, quote: settle ? quote : null, instructions, sandbox: DEMO_MODE }), DEMO_MODE ? 'sandbox' : 'production').lastInsertRowid);
+  notify(u.id, { category:'payment', title:settle ? 'Settlement request created' : 'Repayment request created', body:`${DEMO_MODE ? 'Sandbox only. ' : ''}${ref}: ${GFS.mk2(amount)} is awaiting confirmation. Your balance has not changed yet.`, channels:['inapp'], meta:{ transactionId:id, loanId:loan.id, link:'/portal/payments' }, eventKey:`payment:${id}:created` });
   audit('customer', u.id, 'payment.initiated', 'transaction', id, null, { ref, amount, method: method.id }, ctx.ip, ctx.ua);
   activity(u.id, 'Payment request created', `${ref} · ${GFS.mk(amount)}`, ctx.ip, ctx.ua);
   if (liveMobile) {
@@ -81,7 +82,7 @@ export function verifyAndApply(txnId, { providerRef, source }) {
     const receiptRef = GFS.refs.receipt();
     const receiptId = Number(run(`INSERT INTO receipts(ref,transaction_id,customer_id,loan_id,amount,method) VALUES(?,?,?,?,?,?)`, receiptRef, t.id, t.customer_id, t.loan_id, t.amount, t.method).lastInsertRowid);
     run(`UPDATE transactions SET status='verified',verified_at=datetime('now'),receipt_id=?,provider_ref=?,allocation=?,meta=json_set(meta,'$.verifiedVia',?) WHERE id=?`, receiptId, providerRef, JSON.stringify(result.allocation), source, t.id);
-    notify(t.customer_id, { category: 'payment', title: t.type === 'settlement' ? 'Settlement confirmed' : 'Payment confirmed', body: `${t.environment === 'sandbox' ? 'Sandbox only — no real money moved. ' : ''}${GFS.mk(t.amount)} recorded for ${result.loan.ref}. Receipt ${receiptRef}. Outstanding ${GFS.mk(result.loan.outstanding_principal + result.loan.accrued_interest + result.loan.fees_outstanding + result.loan.penalties)}.`, meta: { receiptId, transactionId: t.id } });
+    notify(t.customer_id, { category: 'payment', title: t.type === 'settlement' ? 'Settlement confirmed' : 'Payment confirmed', body: `${t.environment === 'sandbox' ? 'Sandbox only — no real money moved. ' : ''}${GFS.mk(t.amount)} recorded for ${result.loan.ref}. Receipt ${receiptRef}. Outstanding ${GFS.mk(result.loan.outstanding_principal + result.loan.accrued_interest + result.loan.fees_outstanding + result.loan.penalties)}.`, meta: { receiptId, transactionId: t.id, loanId:t.loan_id, link:`/portal/receipts` }, eventKey:`payment:${t.id}:verified` });
     audit(source === 'sandbox' ? 'sandbox' : 'system', null, 'payment.verified', 'transaction', t.id, null, { ref: t.ref, amount: t.amount, allocation: result.allocation, source }, null, null);
     activity(t.customer_id, 'Payment verified', `${t.ref} · ${receiptRef}`, null, null);
     return { transaction: q1(`SELECT * FROM transactions WHERE id=?`, t.id), receipt: q1(`SELECT * FROM receipts WHERE id=?`, receiptId), loan: result.loan, allocation: result.allocation };
@@ -97,6 +98,7 @@ export async function confirmPayment(ctx) {
     if (t.status === 'verified') throw new HttpError(409, 'A verified payment cannot be reversed here.');
     if (t.status === 'failed') return { payment: serializeTxn(t), failed: true, sandbox: true };
     run(`UPDATE transactions SET status='failed',failure_reason=? WHERE id=?`, clean(ctx.body.reason, 200) || 'Sandbox payment cancelled.', t.id);
+    notify(u.id, { category:'payment', title:'Sandbox payment failed', body:`${t.ref}: ${clean(ctx.body.reason,200) || 'The simulated payment was cancelled.'} No money moved.`, channels:['inapp'], meta:{ transactionId:t.id, link:'/portal/payments' }, eventKey:`payment:${t.id}:failed` });
     audit('sandbox', u.id, 'payment.simulated_failure', 'transaction', t.id, null, null, ctx.ip, ctx.ua);
     return { payment: serializeTxn(q1(`SELECT * FROM transactions WHERE id=?`, t.id)), failed: true, sandbox: true };
   }
@@ -110,6 +112,7 @@ export async function submitPaymentProof(ctx) {
   const reference = clean(ctx.body.providerReference, 150);
   if (reference.length < 3) throw new HttpError(400, 'Enter the bank transfer or cashier receipt reference.');
   run(`UPDATE transactions SET meta=json_set(meta,'$.customerClaimedReference',?,'$.claimedAt',datetime('now')) WHERE id=?`, reference, t.id);
+  notify(u.id, { category:'payment', title:'Payment reference submitted', body:`${t.ref}: your reference is awaiting reconciliation. Your balance has not changed.`, channels:['inapp'], meta:{ transactionId:t.id, link:'/portal/payments' }, eventKey:`payment:${t.id}:proof:${reference}` });
   audit('customer', u.id, 'payment.proof_submitted', 'transaction', t.id, null, { reference }, ctx.ip, ctx.ua);
   return { payment: serializeTxn(q1(`SELECT * FROM transactions WHERE id=?`, t.id)), message: 'Reference submitted for reconciliation. Your balance has not changed.' };
 }
@@ -117,7 +120,7 @@ export async function providerWebhook(ctx) {
   const provider = clean(ctx.params.provider, 30), config = providerConfig(provider);
   if (!['mpamba', 'airtel', 'bank', 'cash'].includes(provider)) throw new HttpError(404, 'Unknown provider.');
   const secret = config.secret || process.env[`GFS_${provider.toUpperCase()}_WEBHOOK_SECRET`] || '';
-  const raw = await readBody(ctx.req, 1024 * 1024), timestamp = String(ctx.req.headers['x-gfs-timestamp'] || ''), signature = String(ctx.req.headers['x-gfs-signature'] || '');
+  const raw = ctx.rawBody, timestamp = String(ctx.req.headers['x-gfs-timestamp'] || ''), signature = String(ctx.req.headers['x-gfs-signature'] || '');
   if (!secret || Math.abs(Date.now() / 1000 - Number(timestamp)) > 300 || !verifyWebhookSignature(`${timestamp}.${raw.toString('utf8')}`, signature, secret)) throw new HttpError(401, 'Invalid or expired webhook signature.');
   let p; try { p = JSON.parse(raw.toString('utf8')); } catch { throw new HttpError(400, 'Invalid JSON.'); }
   const eventId = clean(p.eventId, 100), hash = GFS.refs.transaction && crypto.createHash('sha256').update(raw).digest('hex');
@@ -135,6 +138,7 @@ export async function providerWebhook(ctx) {
     if (p.status === 'failed' || p.status === 'cancelled') {
       if (t.status === 'verified') throw new HttpError(409, 'A verified payment requires a separate reversal workflow.');
       run(`UPDATE transactions SET status='failed',failure_reason=? WHERE id=?`, clean(p.reason, 200) || 'Provider reported failure.', t.id);
+      notify(t.customer_id, { category:'payment', title:'Payment failed', body:`${t.ref}: ${clean(p.reason,200) || 'The provider reported a failure.'} Contact support if you were charged.`, meta:{ transactionId:t.id, link:'/portal/payments' }, eventKey:`payment:${t.id}:failed` });
     } else if (p.status === 'success' || p.status === 'verified') verifyAndApply(t.id, { providerRef: clean(p.providerTransactionId || p.providerRef, 150), source: `provider:${provider}` });
     else throw new HttpError(400, 'Unsupported payment status.');
     run(`INSERT INTO integration_events(id,payload_hash,event_type,result) VALUES(?,?,?,?)`, `${provider}:${eventId}`, hash, `payment.${p.status}`, 'processed');

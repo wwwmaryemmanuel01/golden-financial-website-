@@ -281,6 +281,7 @@
       const sys = await API.get('/api/settings/system');
       const ist = await API.get('/api/integration/status');
       const prefs = u.prefs || {};
+      const adminBase = ist.url || GFS.COMPANY.adminSystem;
       return head('Settings', 'Your preferences — system settings are managed by the back-office and are read-only') + `
       <div class="grid grid-2" style="align-items:start">
         <div>
@@ -312,7 +313,8 @@
             <p class="small muted">Golden Loan Services is the separate administration repository. Its public GitHub Pages version currently uses sample/browser-local data; it is not a live shared database.</p>
             ${UI.table(['Connection', 'Detail'], [['Customer backend', API.mode === 'server' ? 'Connected to this website’s backend' : 'Device-local sandbox'], ['Admin connector', ist.connectorConfigured ? 'Configured — awaiting verified events' : 'Not configured'], ['Repository', `<a href="${esc(ist.repository || GFS.COMPANY.adminRepo)}" target="_blank" rel="noopener">golden-loan-services</a>`], ['Last successful sync', ist.lastSuccess ? GFS.fmtDateTime(ist.lastSuccess) : 'Never']])}
             <div class="alert alert-info small mt-2">${esc(ist.note || 'A link alone does not synchronise databases.')}</div>
-            <a href="${esc(ist.url || GFS.COMPANY.adminSystem)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">View admin prototype ${UI.icon('external')}</a>
+            <div class="admin-settings-links"><a href="${esc(adminBase)}settings.html#s15" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm">${UI.icon('settings')} Integration settings ${UI.icon('external')}</a><a href="${esc(adminBase)}website.html#s3" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm">${UI.icon('bell')} Announcements & content ${UI.icon('external')}</a><a href="${esc(adminBase)}notifications.html" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm">${UI.icon('mail')} Notification settings ${UI.icon('external')}</a></div>
+            <p class="tiny muted mt-2">These links open the separate administration portal. Its public version is a prototype; publishing requires the deployed signed connector.</p>
           </div>
         </div>
       </div>`;
@@ -330,9 +332,9 @@
 
   /* ---------------- ACTIVITY HISTORY ---------------- */
   App.route('/portal/activity', {
-    title: 'Activity History', layout: 'portal', auth: true, render: async () => {
+    title: 'Security history', layout: 'portal', auth: true, render: async () => {
       const d = await API.get('/api/security/activity');
-      return head('Account Activity History', 'A complete audit of actions on your account') + `
+      return head('Security & account history', 'Sign-ins, profile changes and recorded account actions') + `
         <div class="card">${d.activity.length ? UI.table(['When', 'Action', 'Detail'], d.activity.map(a => [GFS.fmtDateTime(a.created_at || a.createdAt), `<b>${esc(a.action)}</b>`, esc(a.detail || '—')])) : UI.empty('🕘', 'No activity recorded yet')}</div>`;
     }
   });

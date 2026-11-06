@@ -67,6 +67,9 @@ system or a deployed connector authenticates with `X-GFS-Integration-Key`.
 | `GET /api/integration/export?since=ISO` | admin ← website | Pull customers, applications, loans, transactions and receipts |
 | `POST /api/integration/settings` | admin → website | Push validated system settings and editorial content |
 | `POST /api/integration/decision` | admin → website | Record an authorised decision: `{applicationRef, decision, reason}` |
+| `POST /api/integration/settings` (`announcements`) | admin → website | Publish the complete public announcement set (withdrawals by omission) |
+| `POST /api/integration/events` (`account.activity`) | admin → website | Report deposit / withdrawal / savings activity on a customer account |
+| `POST /api/integration/events` (`customer.recommendation`) | admin → website | Publish a customer-visible product recommendation |
 | `GET /api/health` | admin ← website | Connection health probe |
 | `GET /api/integration/status` | public | Truthful connector configuration/last-success state |
 
@@ -79,6 +82,73 @@ Until a deployed adapter is configured and successful, `/api/integration/status`
 reports `connectorConfigured`/`connected` truthfully (normally `false` in the
 sandbox). A repository link, shared GitHub Pages origin or browser localStorage
 is not synchronisation.
+
+## 2b. Announcements
+
+`announcements` is published as the **complete** set — a notice omitted from the
+payload is withdrawn. Withdrawn notices keep their history; they stop appearing
+in the public feed.
+
+```json
+{
+  "announcements": [
+    {
+      "id": "rate-update-nov-2026",
+      "title": "Rate update for business loans",
+      "body": "Business loan pricing is reviewed monthly. Your agreed terms do not change mid-term.",
+      "category": "product",
+      "pinned": true,
+      "startsAt": "2026-11-01T06:00:00.000Z",
+      "expiresAt": null,
+      "linkUrl": "/products/BL",
+      "linkLabel": "Business loans"
+    }
+  ]
+}
+```
+
+| Field | Rule |
+|---|---|
+| `id` | Unique lowercase slug, 2–100 characters, `a-z0-9` and single hyphens |
+| `title` / `body` | 3–140 and 10–4000 characters |
+| `category` | `general`, `service`, `product`, `security`, `maintenance`, `promotion` |
+| `startsAt` / `expiresAt` | Optional ISO dates; expiry must follow the start |
+| `linkUrl` | Internal `/path` (no fragments) or an HTTPS URL — never `javascript:` |
+
+Public feed: `GET /api/announcements` → `{announcements, version, checkedAt,
+source, publishingConfigured, adminSettingsUrl}`. Scheduled and expired notices
+are filtered out server-side. `adminSettingsUrl` always points at the admin
+**Website content → announcements** screen so staff can reach the publishing
+controls from any public card. The customer UI polls every 30 seconds while the
+page is visible and never repaints while focus is inside the notice list.
+
+## 2c. Account activity and recommendations
+
+Signed connectors report customer money movement into the read-only activity
+ledger. Records are append-only, idempotent by `(reference, status)` and tagged
+with the environment.
+
+```json
+{
+  "customerNo": "GF-000001",
+  "type": "savings_deposit",
+  "reference": "DEP-2026-0009",
+  "amount": 50000,
+  "status": "completed",
+  "occurredAt": "2026-11-06T08:00:00.000Z",
+  "balanceAfter": 125000,
+  "note": "Branch cash deposit"
+}
+```
+
+Allowed `type` values: `deposit`, `withdrawal`, `savings_deposit`,
+`savings_withdrawal`, `savings_interest`. Allowed `status` values: `completed`,
+`pending`, `rejected`, `reversed`. Each accepted record raises an in-app
+notification (deduplicated by `account:<reference>:<status>`) and appears under
+`/portal/account-activity`, which is read-only for customers.
+
+`POST /api/integration/recommendation` requires a message of at least 10
+characters and, if supplied, a product that is currently published.
 
 ## 3. GitHub Pages boundary
 

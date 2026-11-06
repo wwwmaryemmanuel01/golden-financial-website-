@@ -43,7 +43,7 @@ const App = (() => {
       ['Overview', [['/portal', 'grid', 'Dashboard'], ['/portal/analytics', 'chart', 'Insights']]],
       ['Borrowing', [['/portal/loans', 'wallet', 'My loans'], ['/portal/applications', 'file', 'Applications'], ['/portal/apply', 'plus', 'Apply for a loan'], ['/portal/requests', 'inbox', 'Loan requests']]],
       ['Money & records', [['/portal/payments', 'card', 'Payments'], ['/portal/transactions', 'list', 'Transactions'], ['/portal/receipts', 'receipt', 'Receipts'], ['/portal/statements', 'documents', 'Statements']]],
-      ['Account', [['/portal/profile', 'user', 'Profile'], ['/portal/documents', 'id', 'Documents & KYC'], ['/portal/guarantors', 'users', 'Guarantors'], ['/portal/collateral', 'home', 'Collateral'], ['/portal/security', 'shield', 'Security'], ['/portal/settings', 'settings', 'Settings'], ['/portal/activity', 'clock', 'Activity']]],
+      ['Account', [['/portal/profile', 'user', 'Profile'], ['/portal/documents', 'id', 'Documents & KYC'], ['/portal/guarantors', 'users', 'Guarantors'], ['/portal/collateral', 'home', 'Collateral'], ['/portal/security', 'shield', 'Security'], ['/portal/settings', 'settings', 'Settings'], ['/portal/account-activity', 'wallet', 'Account activity'], ['/portal/activity', 'clock', 'Security history']]],
       ['Help', [['/portal/chat', 'chat', 'Assistant'], ['/portal/support', 'headset', 'Support & complaints'], ['/portal/notifications', 'bell', 'Notifications', unread]]]
     ];
     const name = user ? `${user.firstName || ''} ${user.lastName || ''}` : '';
@@ -55,6 +55,10 @@ const App = (() => {
   function topbar(title) {
     return `<header class="topbar admin-topbar"><button class="icon-btn menu-btn" id="menu-btn" aria-label="Open portal menu" aria-expanded="false" aria-controls="sidebar">${UI.icon('menu')}</button><div class="topbar-title"><h1>${UI.esc(title)}</h1><span>Customer portal · ${modeLabel()}</span></div><div class="spacer"></div><button class="icon-btn search-trigger" id="search-open" aria-label="Search">${UI.icon('search')}</button><span class="mode-chip ${API.mode === 'local' || config?.mode === 'sandbox' ? 'sandbox' : ''}">${UI.icon(API.mode === 'local' || config?.mode === 'sandbox' ? 'flask' : 'shield')} ${modeLabel()}</span><button class="icon-btn notif-trigger" id="notif-btn" aria-label="${unread} unread notifications">${UI.icon('bell')}${unread ? `<span class="dot">${unread > 9 ? '9+' : unread}</span>` : ''}</button><button class="icon-btn" id="logout-top" aria-label="Sign out">${UI.icon('logout')}</button></header>`;
   }
+  function portalFooter() {
+    const c = company(), sandbox = API.mode === 'local' || config?.mode === 'sandbox';
+    return `<footer class="portal-footer"><div class="portal-footer-main"><div class="portal-footer-brand">${brand(true)}<span>Secure customer workspace</span></div><nav aria-label="Portal footer"><a href="#/portal">Dashboard</a><a href="#/portal/notifications">Notifications</a><a href="#/portal/support">Support</a><a href="#/portal/settings">Settings</a><a href="#/">Public website</a></nav></div><div class="portal-footer-bottom"><span>© ${new Date().getFullYear()} ${UI.esc(c.legal || c.name)}. All rights reserved.</span><span class="portal-footer-status">${UI.icon(sandbox ? 'flask' : 'shield')} ${sandbox ? 'Sandbox · no real money moves' : 'Customer records · own-account access'}</span><a href="${UI.esc(c.adminSystem)}settings.html#s15" target="_blank" rel="noopener noreferrer">Administration settings ${UI.icon('external')}</a></div></footer>`;
+  }
   async function render() {
     const version = ++renderVersion, p = path(), m = match(p), root = app();
     if (pageCleanup) { pageCleanup(); pageCleanup = null; }
@@ -64,7 +68,7 @@ const App = (() => {
     if (r.auth && !user) { go('/login?next=' + encodeURIComponent(p + (location.hash.includes('?') ? '?' + location.hash.split('?')[1] : ''))); return; }
     document.title = (r.title ? r.title + ' — ' : '') + 'Golden Financial Services';
     const layout = r.layout || 'public';
-    if (layout === 'portal') root.innerHTML = `<a class="skip-link" href="#page">Skip to content</a><div class="portal">${sidebar(p)}<div class="portal-main">${topbar(r.title || '')}<main class="portal-content" id="page" tabindex="-1">${UI.loading()}</main></div></div>`;
+    if (layout === 'portal') root.innerHTML = `<a class="skip-link" href="#page">Skip to content</a><div class="portal">${sidebar(p)}<div class="portal-main">${topbar(r.title || '')}<main class="portal-content" id="page" tabindex="-1">${UI.loading()}</main>${portalFooter()}</div></div>`;
     else if (layout === 'auth') root.innerHTML = `<main id="page" tabindex="-1">${UI.loading()}</main>`;
     else root.innerHTML = publicHeader(r.nav || p) + `<main id="page" tabindex="-1">${UI.loading()}</main>` + publicFooter();
     bindShell(); window.scrollTo(0, 0);
@@ -125,9 +129,24 @@ const App = (() => {
   }
   async function refreshUser() { try { user = (await API.get('/api/me')).user; } catch { user = null; } if (user) { try { unread = (await API.get('/api/notifications')).unread || 0; } catch {} } return user; }
   function resetIdle() { clearTimeout(idleTimer); if (!user) return; const minutes = config?.rules?.idleTimeoutMinutes || 20; idleTimer = setTimeout(async () => { if (!user) return; try { await API.post('/api/auth/logout'); } catch {} API.setToken(''); user = null; UI.toast('You were signed out after inactivity.', 'info'); go('/login'); }, minutes * 60000); }
+  function paintBell() {
+    const button = document.querySelector('#notif-btn'); if (!button) return;
+    button.setAttribute('aria-label', `${unread} unread notification${unread === 1 ? '' : 's'}`);
+    button.querySelector('.dot')?.remove();
+    if (unread) button.insertAdjacentHTML('beforeend', `<span class="dot">${unread > 9 ? '9+' : unread}</span>`);
+    document.querySelectorAll('.s-nav a[href="#/portal/notifications"] em').forEach(el => { el.textContent = unread > 99 ? '99+' : unread; });
+  }
+  let notificationTimer;
+  function startNotificationEngine() {
+    clearInterval(notificationTimer);
+    const check = async () => { if (!user || document.visibilityState !== 'visible') return; try { const d = await API.get('/api/notifications?channel=inapp&limit=1'); const previous = unread; unread = d.unread || 0; paintBell(); if (unread > previous) UI.toast(`${unread - previous} new account notification${unread - previous === 1 ? '' : 's'}. Open the bell to review.`, 'info'); } catch {} };
+    notificationTimer = setInterval(check, 30000);
+    document.addEventListener('visibilitychange', check); window.addEventListener('focus', check);
+  }
   async function boot() {
     await API.init();
-    if (API.mode !== 'unavailable') { try { config = await API.get('/api/config'); } catch { config = null; } if (config) { const [announcements, blog] = await Promise.allSettled([API.get('/api/announcements'), API.get('/api/blog/posts')]); if (announcements.status === 'fulfilled') config.announcements = announcements.value.announcements; if (blog.status === 'fulfilled') { config.blogPosts = blog.value.posts; config.blogSource = blog.value.source; } } await refreshUser(); }
+    if (API.mode !== 'unavailable') { try { config = await API.get('/api/config'); } catch { config = null; } if (config) { const [announcements, blog] = await Promise.allSettled([API.get('/api/announcements'), API.get('/api/blog/posts')]); if (announcements.status === 'fulfilled') { config.announcements = announcements.value.announcements; config.announcementSettingsUrl = announcements.value.adminSettingsUrl; } if (blog.status === 'fulfilled') { config.blogPosts = blog.value.posts; config.blogSource = blog.value.source; } } await refreshUser(); }
+    startNotificationEngine();
     API.onUnauthorized(() => { user = null; if (path().startsWith('/portal')) go('/login'); });
     window.addEventListener('hashchange', render);
     document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); searchPalette(); } });
@@ -138,6 +157,6 @@ const App = (() => {
   }
   const routeDefinition = pattern => routes.find(r => r.pattern === pattern);
   const renderRoute = (pattern, params, query) => routeDefinition(pattern).render(params, query);
-  return { route, routeDefinition, renderRoute, go, render, boot, refreshUser, searchPalette, get user() { return user; }, set user(u) { user = u; resetIdle(); }, get config() { return config; }, get unread() { return unread; }, set unread(n) { unread = n; }, path, query, products, company, modeLabel };
+  return { route, routeDefinition, renderRoute, go, render, boot, refreshUser, searchPalette, get user() { return user; }, set user(u) { user = u; resetIdle(); }, get config() { return config; }, get unread() { return unread; }, set unread(n) { unread = n; paintBell(); }, path, query, products, company, modeLabel };
 })();
 window.addEventListener('DOMContentLoaded', App.boot);

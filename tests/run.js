@@ -122,7 +122,52 @@ const run = async () => {
   const txns = await api('GET', '/api/transactions');
   check('transaction history', txns.transactions.length > 5);
   const exp = await api('GET', '/api/export/my-data');
-  check('own-data export', !!exp.profile && Array.isArray(exp.loans));
+  check('own-data export', !!exp.profile && Array.isArray(exp.loans) && Array.isArray(exp.accountActivity));
+
+  /* Professional follow-up: shared calculator, managed notices and activity engine. */
+  const defaults = await api('POST', '/api/calculator', {});
+  check('calculator defaults: 1%, 5%, one month, annual frequency', defaults.schedule.ratePct === 1 && defaults.schedule.feePct === 5 && defaults.schedule.termMonths === 1 && defaults.schedule.paymentFrequency === 'annually' && defaults.schedule.rows.length === 1);
+  check('one-month annual-frequency loan matures once without extending the term', defaults.schedule.totalInterest === defaults.schedule.principal * .01 && defaults.schedule.endDate === new Date(new Date(defaults.schedule.startDate).setMonth(new Date(defaults.schedule.startDate).getMonth() + 1)).toISOString().slice(0,10));
+  const flat = await api('POST', '/api/calculator', { amount:120000, ratePct:1, feePct:5, termMonths:12, paymentFrequency:'monthly', method:'flat', startDate:'2026-01-15' });
+  const reducing = await api('POST', '/api/calculator', { amount:120000, ratePct:1, feePct:5, termMonths:12, paymentFrequency:'monthly', method:'reducing', startDate:'2026-01-15' });
+  check('flat and reducing formulas produce distinct correct interest', flat.schedule.totalInterest === 14400 && reducing.schedule.totalInterest < flat.schedule.totalInterest && reducing.schedule.rows.at(-1).closing === 0);
+  check('result sheet separates repayment from upfront processing fee', flat.schedule.totalFees === 6000 && flat.schedule.totalRepayable === 134400 && flat.schedule.netDisbursement === 114000 && flat.schedule.rows.every(r => /^\d{4}-\d{2}-\d{2}$/.test(r.dueDate)));
+  const integrationKey = process.env.GFS_TEST_INTEGRATION_KEY;
+const runId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  if (!integrationKey) throw new Error('Set GFS_TEST_INTEGRATION_KEY to the isolated test server’s GFS_INTEGRATION_KEY.');
+  const signed = async (path, body, expect = 200) => {
+    const raw = JSON.stringify(body), timestamp = String(Math.floor(Date.now()/1000));
+    const signature = crypto.createHmac('sha256', integrationKey).update(`${timestamp}.${raw}`).digest('hex');
+    const res = await fetch(BASE + path, { method:'POST', headers:{ 'Content-Type':'application/json', 'X-GFS-Timestamp':timestamp, 'X-GFS-Signature':`sha256=${signature}` }, body:raw });
+    const data = await res.json(); if (res.status !== expect) throw new Error(`signed ${path} → ${res.status}: ${JSON.stringify(data)}`); return data;
+  };
+  const notice = { id:'test-service-notice', title:'Scheduled maintenance notice', body:'The customer portal will be briefly unavailable during scheduled maintenance.', category:'maintenance', pinned:true, linkUrl:'/portal', linkLabel:'Open the portal' };
+  await signed('/api/integration/settings', { announcements:[notice] });
+  let feed = await api('GET', '/api/announcements');
+  check('administration can publish a linked announcement to the public feed', feed.announcements.some(a => a.slug === notice.id && a.linkUrl === '/portal' && a.source === 'system') && feed.publishingConfigured === true && feed.adminSettingsUrl.includes('website.html#s3'));
+  await signed('/api/integration/settings', { announcements:[{ ...notice, linkUrl:'javascript:alert(1)' }] }, 400);
+  check('announcement publishing rejects script links', true);
+  await signed('/api/integration/settings', { announcements:[{ ...notice, id:'future-notice', startsAt:new Date(Date.now()+86400000).toISOString() }, { ...notice, id:'expired-notice', expiresAt:new Date(Date.now()-86400000).toISOString() }] });
+  feed = await api('GET', '/api/announcements');
+  check('scheduled and expired notices are hidden from the public feed', !feed.announcements.some(a => ['future-notice','expired-notice'].includes(a.slug)));
+  await signed('/api/integration/settings', { announcements:[] });
+  feed = await api('GET', '/api/announcements');
+  check('administration can withdraw notices without deleting history', feed.announcements.length === 0);
+  const customerId = login.user.id;
+  for (const [activity, reference, amount] of [['deposit','DEP-TEST-001',25000],['savings_deposit','SAV-TEST-001',10000],['withdrawal','WDR-TEST-001',5000]]) {
+    await signed('/api/integration/events', { eventId:`evt-${reference}-${runId}`, type:'account.activity', customerId, activity, reference, amount, status:'completed', occurredAt:new Date().toISOString() });
+  }
+  await signed('/api/integration/events', { eventId:`evt-recommendation-${runId}`, type:'customer.recommendation', customerId, reference:'REC-TEST-001', title:'Consider a salary advance', message:'Based on your published profile, a salary advance may fit your next pay cycle.', productId:'SA' });
+  const account = await api('GET', '/api/account-activity');
+  check('signed deposits, savings and withdrawals appear in own-account history', account.activities.length === 3 && account.activities.every(a => a.status === 'completed'));
+  const notices = await api('GET', '/api/notifications');
+  const categories = new Set(notices.notifications.map(n => n.category));
+  check('notification engine covers repayment, disbursement, decisions, deposits, savings, withdrawals and recommendations', ['payment','disbursement','application','deposit','savings','withdrawal','recommendation'].every(c => categories.has(c)));
+  check('activity notifications link to real portal records', notices.notifications.filter(n => ['deposit','savings','withdrawal'].includes(n.category)).every(n => JSON.parse(n.meta).link === '/portal/account-activity'));
+  const beforeReplay = notices.unread;
+  await signed('/api/integration/events', { eventId:`evt-replay-${runId}`, type:'account.activity', customerId, activity:'deposit', reference:'DEP-TEST-001', amount:25000, status:'completed', occurredAt:account.activities.find(a => a.reference === 'DEP-TEST-001').occurredAt });
+  const afterReplay = await api('GET', '/api/notifications');
+  check('replayed activity does not duplicate notifications', afterReplay.unread === beforeReplay && afterReplay.notifications.length === notices.notifications.length);
 
   const email = `test${Date.now()}@example.com`;
   const reg = await api('POST', '/api/auth/register', { firstName: 'Test', lastName: 'User', email, phone: '0888123456', password: 'Test@1234', acceptTerms: true });

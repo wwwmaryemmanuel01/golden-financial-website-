@@ -11,6 +11,7 @@ import { decideApplication, createDisbursement, serializeApp } from './loans.js'
 import { verifyAndApply } from './payments.js';
 import { notify } from './notifications.js';
 import { cents } from './finance.js';
+import { recordAccountActivity } from './account-activity.js';
 import GFS from '../shared/core.mjs';
 export async function health() { q1(`SELECT 1 x`); return { status: 'ok', service: 'golden-financial-customer-api', version: '2.0.0', currency: 'MWK', database: 'sqlite', mode: DEMO_MODE ? 'sandbox' : 'backend', time: new Date().toISOString() }; }
 export async function publicConfig() {
@@ -18,13 +19,13 @@ export async function publicConfig() {
     theme: getSetting('theme', {}), currency: 'MWK', readOnlyForCustomers: true, mode: DEMO_MODE ? 'sandbox' : 'backend', configVersion: getSetting('config_version', 1),
     features: { applications: true, statements: true, encryptedDocuments: true, immutableLedger: true, sandboxPayments: DEMO_MODE, automatedAssistant: true, aiConfigured: !!AI_API_URL,
       smsConfigured: !!SMS_WEBHOOK && !!NOTIFICATION_KEY, emailConfigured: !!EMAIL_WEBHOOK && !!NOTIFICATION_KEY },
-    system: { name: 'Golden Loan Services', repository: 'https://github.com/wwwmaryemmanuel01/golden-loan-services', url: SYSTEM_URL, connectorConfigured: !!INTEGRATION_KEY && !!SYSTEM_API_URL },
+    system: { name: 'Golden Loan Services', repository: 'https://github.com/wwwmaryemmanuel01/golden-loan-services', url: SYSTEM_URL, connectorConfigured: !!INTEGRATION_KEY && !!SYSTEM_API_URL, publishingConfigured:INTEGRATION_KEY.length >= 32, announcementSettingsUrl:new URL('website.html#s3', SYSTEM_URL).href },
     notice: DEMO_MODE ? 'Sandbox demonstration. Approvals, disbursements and payment confirmations are simulated; no real money moves.' : 'Live backend mode. External services operate only where explicitly configured.' };
 }
 export async function status() {
   const lastSuccess = getSetting('last_success', null) || q1(`SELECT value FROM integration_state WHERE key='last_success'`)?.value || null;
   return { name: 'Golden Loan Services', repository: 'https://github.com/wwwmaryemmanuel01/golden-loan-services', url: SYSTEM_URL,
-    connectorConfigured: !!INTEGRATION_KEY && !!SYSTEM_API_URL, connected: !!lastSuccess, lastSuccess,
+    connectorConfigured: !!INTEGRATION_KEY && !!SYSTEM_API_URL, publishingConfigured:INTEGRATION_KEY.length >= 32, announcementSettingsUrl:new URL('website.html#s3', SYSTEM_URL).href, connected: !!lastSuccess, lastSuccess,
     pendingEvents: q1(`SELECT COUNT(*) n FROM integration_outbox WHERE status IN ('pending','retry')`).n,
     failedEvents: q1(`SELECT COUNT(*) n FROM integration_outbox WHERE status='failed'`).n,
     note: 'The public admin repository currently uses sample/browser-local data. A deployed authenticated adapter is required for central synchronisation. A link alone does not connect databases.' };
@@ -35,7 +36,7 @@ function requireSystem(ctx) {
 }
 export async function pushSettings(ctx) {
   requireSystem(ctx); const patch = catalog.validateSettingsPatch(ctx.body);
-  tx(() => { for (const [k, v] of Object.entries(patch)) setSetting(k, v); setSetting('config_version', getSetting('config_version', 1) + 1); audit('system', null, 'settings.published', 'settings', 'system', null, { keys: Object.keys(patch), version: getSetting('config_version') }, ctx.ip, ctx.ua); });
+  tx(() => { for (const [k, v] of Object.entries(patch)) if (k !== 'announcements') setSetting(k, v); if (patch.announcements !== undefined) catalog.publishAnnouncements(patch.announcements); setSetting('config_version', getSetting('config_version', 1) + 1); audit('system', null, 'settings.published', 'settings', 'system', null, { keys: Object.keys(patch), version: getSetting('config_version') }, ctx.ip, ctx.ua); });
   return { ok: true, configVersion: getSetting('config_version') };
 }
 const requireId = (value, label) => { const n = Number(value); if (!Number.isSafeInteger(n) || n <= 0) throw new HttpError(400, `${label} must be a positive integer.`); return n; };
@@ -43,18 +44,28 @@ function processEvent(p) {
   const customerId = requireId(p.customerId, 'customerId'), u = q1(`SELECT * FROM customers WHERE id=?`, customerId);
   if (!u) throw new HttpError(404, 'Customer not found.');
   switch (p.type) {
+    case 'account.activity': return recordAccountActivity(customerId, p);
+    case 'customer.recommendation': {
+      const message = clean(p.message, 2000), title = clean(p.title, 140) || 'A recommendation for you';
+      if (message.length < 10) throw new HttpError(400, 'A recommendation message of at least 10 characters is required.');
+      const productId = p.productId ? clean(p.productId, 20) : null;
+      if (productId && !catalog.product(productId)) throw new HttpError(400, 'Recommended product is not published.');
+      const reference = clean(p.reference, 150) || `recommendation:${customerId}:${crypto.createHash('sha256').update(message).digest('hex').slice(0,16)}`;
+      notify(customerId, { category:'recommendation', title, body:message, channels:['inapp'], meta:{ productId, link:productId ? `/loans/${productId}` : '/portal', reference }, eventKey:`recommendation:${reference}` });
+      return { customerId, reference };
+    }
     case 'customer.kyc': {
       if (typeof p.verified !== 'boolean' || !clean(p.reason, 1000)) throw new HttpError(400, 'KYC decision and reason are required.');
       const status = p.verified ? 'verified' : 'rejected';
       run(`UPDATE customers SET kyc_status=?,updated_at=datetime('now') WHERE id=?`, status, customerId);
-      notify(customerId, { category: 'kyc', title: `Identity review ${status}`, body: clean(p.reason, 1000), channels: ['inapp'] });
+      notify(customerId, { category: 'kyc', title: `Identity review ${status}`, body: clean(p.reason, 1000), channels: ['inapp'], eventKey:`kyc:${customerId}:${status}:${clean(p.reason,1000)}` });
       return { customerId, status };
     }
     case 'document.review': {
       const id = requireId(p.documentId, 'documentId'), d = q1(`SELECT * FROM documents WHERE id=? AND customer_id=?`, id, customerId);
       if (!d || typeof p.verified !== 'boolean') throw new HttpError(400, 'Invalid document review.');
       run(`UPDATE documents SET status=?,notes=?,verified_at=CASE WHEN ? THEN datetime('now') ELSE NULL END WHERE id=?`, p.verified ? 'verified' : 'rejected', clean(p.reason, 1000), p.verified ? 1 : 0, id);
-      notify(customerId, { category: 'document', title: `Document ${p.verified ? 'verified' : 'needs attention'}`, body: `${d.filename}: ${clean(p.reason, 1000)}`, channels: ['inapp'] });
+      notify(customerId, { category: 'document', title: `Document ${p.verified ? 'verified' : 'needs attention'}`, body: `${d.filename}: ${clean(p.reason, 1000)}`, channels: ['inapp'], eventKey:`document:${id}:${p.verified ? 'verified' : 'rejected'}` });
       return { documentId: id };
     }
     case 'guarantor.review': {
@@ -62,17 +73,20 @@ function processEvent(p) {
       if (typeof p.consentVerified !== 'boolean' || typeof p.identityVerified !== 'boolean') throw new HttpError(400, 'Consent and identity decisions are required.');
       const verified = p.consentVerified && p.identityVerified;
       run(`UPDATE guarantors SET status=?,consent=?,consent_evidence=? WHERE id=?`, verified ? 'verified' : 'rejected', p.consentVerified ? 1 : 0, clean(p.evidenceReference, 200), id);
+      notify(customerId, { category:'guarantor', title:`Guarantor review ${verified ? 'verified' : 'needs attention'}`, body:verified ? 'Consent and identity were verified by the administration system.' : clean(p.reason,1000) || 'The guarantor review needs attention. Open your application for details.', channels:['inapp'], meta:{ guarantorId:id, link:'/portal/guarantors' }, eventKey:`guarantor:${id}:${verified}` });
       return { guarantorId: id, verified };
     }
     case 'collateral.valuation': {
       const id = requireId(p.collateralId, 'collateralId'); if (!q1(`SELECT id FROM collateral WHERE id=? AND customer_id=?`, id, customerId)) throw new HttpError(404, 'Collateral not found.');
       const value = Number(p.value); if (!Number.isFinite(value) || value <= 0 || !clean(p.valuedBy, 120)) throw new HttpError(400, 'Professional valuation and valuer are required.');
-      run(`UPDATE collateral SET valued_amount=?,valued_by=?,valuation_date=date('now'),status='verified' WHERE id=?`, value, clean(p.valuedBy, 120), id); return { collateralId: id, value };
+      run(`UPDATE collateral SET valued_amount=?,valued_by=?,valuation_date=date('now'),status='verified' WHERE id=?`, value, clean(p.valuedBy, 120), id); notify(customerId, { category:'collateral', title:'Collateral valuation recorded', body:`Professional valuation recorded: ${GFS.mk2(value)}. Open your collateral record for details.`, channels:['inapp'], meta:{ collateralId:id, link:'/portal/collateral' }, eventKey:`collateral:${id}:valuation:${cents(value)}` });
+      return { collateralId: id, value };
     }
     case 'collateral.release': {
       const id = requireId(p.collateralId, 'collateralId'), c = q1(`SELECT c.*,l.status loan_status FROM collateral c LEFT JOIN loans l ON l.id=c.loan_id WHERE c.id=? AND c.customer_id=?`, id, customerId);
       if (!c || (c.loan_id && !['closed', 'settled'].includes(c.loan_status))) throw new HttpError(409, 'Security can be released only after the secured loan is settled.');
-      run(`UPDATE collateral SET status='released',released_at=datetime('now') WHERE id=?`, id); return { collateralId: id };
+      run(`UPDATE collateral SET status='released',released_at=datetime('now') WHERE id=?`, id); notify(customerId, { category:'collateral', title:'Collateral released', body:'The administration system released this security after settlement.', channels:['inapp'], meta:{ collateralId:id, link:'/portal/collateral' }, eventKey:`collateral:${id}:released` });
+      return { collateralId: id };
     }
     case 'application.decision': {
       const id = requireId(p.applicationId, 'applicationId'); if (!q1(`SELECT id FROM applications WHERE id=? AND customer_id=?`, id, customerId)) throw new HttpError(404, 'Application not found.');
@@ -94,14 +108,14 @@ function processEvent(p) {
       const id = requireId(p.requestId, 'requestId'); if (!q1(`SELECT id FROM requests WHERE id=? AND customer_id=?`, id, customerId)) throw new HttpError(404, 'Request not found.');
       if (!['approved', 'rejected', 'completed'].includes(p.status) || !clean(p.response, 2000)) throw new HttpError(400, 'Valid request decision and response are required.');
       run(`UPDATE requests SET status=?,response=?,updated_at=datetime('now') WHERE id=?`, p.status, clean(p.response, 2000), id);
-      notify(customerId, { category: 'request', title: 'Request updated', body: clean(p.response, 2000), channels: ['inapp'] }); return { requestId: id };
+      notify(customerId, { category: 'request', title: 'Request updated', body: clean(p.response, 2000), channels: ['inapp'], meta:{ requestId:id, link:'/portal/requests' }, eventKey:`request:${id}:${p.status}` }); return { requestId: id };
     }
     case 'support.reply': {
       const id = requireId(p.ticketId, 'ticketId'); if (!q1(`SELECT id FROM tickets WHERE id=? AND customer_id=?`, id, customerId)) throw new HttpError(404, 'Ticket not found.');
       const message = clean(p.message, 5000); if (!message) throw new HttpError(400, 'Reply message is required.');
       run(`INSERT INTO ticket_messages(ticket_id,sender,sender_name,body,source) VALUES(?,?,?,?,?)`, id,  'agent', clean(p.agentName, 80) || 'Credit officer', message, 'human');
       run(`UPDATE tickets SET status='answered',updated_at=datetime('now') WHERE id=?`, id);
-      notify(customerId, { category: 'support', title: 'Support replied', body: message, channels: ['inapp'], meta: { ticketId: id } }); return { ticketId: id };
+      notify(customerId, { category: 'support', title: 'Support replied', body: message, channels: ['inapp'], meta: { ticketId: id, link:`/portal/support` }, eventKey:`support:${id}:${crypto.createHash('sha256').update(message).digest('hex').slice(0,16)}` }); return { ticketId: id };
     }
     default: throw new HttpError(400, `Unsupported system event: ${clean(p.type, 80)}`);
   }
@@ -116,4 +130,4 @@ export async function ingest(ctx) {
 }
 export async function exportCustomers(ctx) { requireSystem(ctx); return { exportedAt: new Date().toISOString(), customers: q(`SELECT id,customer_no,first_name,last_name,email,phone,kyc_status,status,created_at FROM customers ORDER BY id`).map(c => ({ id: c.id, customerNo: c.customer_no, firstName: c.first_name, lastName: c.last_name, email: c.email, phone: c.phone, kycStatus: c.kyc_status, status: c.status, createdAt: c.created_at })) }; }
 export async function exportApplications(ctx) { requireSystem(ctx); return { applications: q(`SELECT * FROM applications ORDER BY id`).map(serializeApp) }; }
-export async function customerSettings(ctx) { const u = requireAuth(ctx); const s = await status(); return { readOnly: true, ownedBy: 'Golden Loan Services back-office system', company: catalog.company(), products: catalog.products(), paymentMethods: catalog.methods(), branches: getSetting('branches', GFS.BRANCHES), rules: catalog.rules(), theme: getSetting('theme', {}), currency: 'MWK', connection: s, note: 'Customers can read published settings but cannot change them. The public admin prototype is not a live shared database.' }; }
+export async function customerSettings(ctx) { const u = requireAuth(ctx); const s = await status(); return { readOnly: true, ownedBy: 'Golden Loan Services back-office system', company: catalog.company(), products: catalog.products(), paymentMethods: catalog.methods(), branches: getSetting('branches', GFS.BRANCHES), rules: catalog.rules(), theme: getSetting('theme', {}), currency: 'MWK', connection: s, adminLinks:{ integrations:new URL('settings.html#s15', SYSTEM_URL).href, announcements:new URL('website.html#s3', SYSTEM_URL).href, notifications:new URL('notifications.html', SYSTEM_URL).href }, note: 'Customers can read published settings but cannot change them. The public admin prototype is not a live shared database.' }; }

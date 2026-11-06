@@ -110,16 +110,19 @@
       const email = d.notifications.filter(n => n.channel === 'email');
       return head('Notifications', `${d.unread} unread · in-app, SMS and email history`, '<button class="btn btn-ghost btn-sm" id="read-all">✓ Mark all read</button>') + `
       <div class="tabs" id="notif-tabs"><button class="active" data-tab="inapp">🔔 In-app (${inapp.length})</button><button data-tab="sms">📱 SMS history (${sms.length})</button><button data-tab="email">✉️ Email history (${email.length})</button></div>
-      <div class="card" style="padding:0" id="notif-panel">${notifList(inapp)}</div>`;
+      <div class="notification-filter"><label class="journal-sort">Activity category<select id="notif-category"><option value="">All activity</option>${[...new Set(d.notifications.map(n => n.category))].sort().map(c => `<option value="${esc(c)}">${esc(c[0].toUpperCase() + c.slice(1))}</option>`).join('')}</select></label><a href="#/portal/account-activity" class="btn btn-ghost btn-sm">${UI.icon('wallet')} Deposits, savings & withdrawals</a></div><div class="card" style="padding:0" id="notif-panel">${notifList(inapp)}</div>`;
     },
     mount: async el => {
       const d = await API.get('/api/notifications');
+      let channel = 'inapp';
       const groups = { inapp: d.notifications.filter(n => n.channel === 'inapp'), sms: d.notifications.filter(n => n.channel === 'sms'), email: d.notifications.filter(n => n.channel === 'email') };
       el.querySelectorAll('#notif-tabs button').forEach(b => b.onclick = () => {
         el.querySelectorAll('#notif-tabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
-        el.querySelector('#notif-panel').innerHTML = notifList(groups[b.dataset.tab]);
+        channel = b.dataset.tab; paintNotifications();
         bindItems();
       });
+      const paintNotifications = () => { const category = el.querySelector('#notif-category').value; el.querySelector('#notif-panel').innerHTML = notifList(groups[channel].filter(n => !category || n.category === category)); bindItems(); };
+      el.querySelector('#notif-category').addEventListener('change', paintNotifications);
       async function bindItems() {
         el.querySelectorAll('[data-read]').forEach(b => b.onclick = async () => { await API.post(`/api/notifications/${b.dataset.read}/read`); await App.refreshUser(); App.render(); });
       }
@@ -127,11 +130,21 @@
       el.querySelector('#read-all').onclick = async () => { await API.post('/api/notifications/read-all'); await App.refreshUser(); UI.toast('All marked read ✓'); App.render(); };
     }
   });
+  function notificationMeta(n) { try { return typeof n.meta === 'string' ? JSON.parse(n.meta || '{}') : (n.meta || {}); } catch { return {}; } }
+  function notificationLink(n) {
+    const meta = notificationMeta(n);
+    if (typeof meta.link === 'string' && /^\/(?!\/)/.test(meta.link)) return meta.link;
+    if (meta.loanId) return `/portal/loans/${Number(meta.loanId)}`;
+    if (meta.applicationId) return `/portal/applications/${Number(meta.applicationId)}`;
+    if (meta.transactionId || meta.receiptId) return '/portal/payments';
+    if (meta.ticketId) return '/portal/support';
+    return { deposit:'/portal/account-activity', withdrawal:'/portal/account-activity', savings:'/portal/account-activity', recommendation:'/portal', security:'/portal/security', kyc:'/portal/documents', document:'/portal/documents', guarantor:'/portal/guarantors', collateral:'/portal/collateral', request:'/portal/requests' }[n.category] || '/portal';
+  }
   function notifList(ns) {
     if (!ns.length) return UI.empty('🔔', 'Nothing here yet', 'Notifications about your loans, payments and account appear here.');
     return ns.map(n => `<div class="notif-item ${!(n.readAt || n.read_at) && n.channel === 'inapp' ? 'unread' : ''}">
       <div class="n-ico">${UI.notifIcon(n.category)}</div>
-      <div style="flex:1;min-width:0"><div class="n-title">${esc(n.title)}</div><div class="n-body">${esc(n.body)}</div><div class="n-time mt-1">${GFS.fmtDateTime(n.createdAt || n.created_at)} · ${esc(n.category)}${n.channel !== 'inapp' ? ' · ' + esc((n.delivery_status || 'not_configured').replaceAll('_', ' ')) : ''}</div></div>
+      <div style="flex:1;min-width:0"><div class="n-title">${esc(n.title)}</div><div class="n-body">${esc(n.body)}</div><div class="n-time mt-1">${GFS.fmtDateTime(n.createdAt || n.created_at)} · ${esc(n.category)}${n.channel !== 'inapp' ? ' · ' + esc((n.delivery_status || 'not_configured').replaceAll('_', ' ')) : ''}</div><a class="text-link tiny mt-1" href="#${esc(notificationLink(n))}">View related record ${UI.icon('arrow')}</a></div>
       ${!(n.readAt || n.read_at) && n.channel === 'inapp' ? `<button class="btn btn-ghost btn-sm" data-read="${n.id}">Mark read</button>` : ''}
     </div>`).join('');
   }

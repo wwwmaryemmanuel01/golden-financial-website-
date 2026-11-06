@@ -47,6 +47,7 @@ const Experience = (() => {
 
 const Blog = (() => {
   const esc = UI.esc;
+  const CARD_MOTIONS = Object.freeze({ plans:'tilt', interest:'spin', business:'swap', agriculture:'flap', salary:'flip', emergency:'rotate', security:'breathe', repayments:'twinkle' });
   const ARTS = new Set(['plans', 'interest', 'business', 'agriculture', 'salary', 'emergency', 'security', 'repayments']);
   const date = value => GFS.fmtDate(value);
   const minutes = post => Number(post.readMinutes) || GFS_CONTENT.readingMinutes(post);
@@ -64,11 +65,11 @@ const Blog = (() => {
       security: '<path class="art-shield" d="M130 35 202 62v57c0 40-35 65-72 78-37-13-72-38-72-78V62Z"/><rect class="art-panel" x="99" y="103" width="62" height="51" rx="9"/><path class="art-line draw-line" d="M111 103V88a19 19 0 0 1 38 0v15"/><circle class="art-dot" cx="130" cy="127" r="6"/>',
       repayments: '<circle class="art-ring" cx="130" cy="112" r="70"/><path class="art-line draw-line" d="m94 113 25 25 49-52"/><path class="art-line" d="M183 49h29v29M212 49a91 91 0 0 1 13 88"/>'
     };
-    return `<div class="journal-art art-${kind} ${compact ? 'compact' : ''}" aria-hidden="true"><span class="art-orbit"></span><svg viewBox="0 0 260 220" fill="none" xmlns="http://www.w3.org/2000/svg">${shapes[kind]}<circle class="art-spark" cx="222" cy="166" r="4"/><circle class="art-spark spark-two" cx="35" cy="54" r="3"/></svg></div>`;
+    return `<div class="journal-art art-${kind} motion-${CARD_MOTIONS[kind]} ${compact ? 'compact' : ''}" aria-hidden="true"><span class="art-orbit"></span><svg viewBox="0 0 260 220" fill="none" xmlns="http://www.w3.org/2000/svg">${shapes[kind]}<circle class="art-spark" cx="222" cy="166" r="4"/><circle class="art-spark spark-two" cx="35" cy="54" r="3"/></svg></div>`;
   }
   function card(post, index = 0, options = {}) {
     const bookmark = options.bookmark !== false;
-    return `<article class="journal-card ${options.featured ? 'featured' : ''}" data-reveal style="--i:${Number(index) % 6};--card-accent:${esc(GFS.productById(post.productId)?.colour || '#C9A227')}">
+    return `<article class="journal-card ${options.featured ? 'featured' : ''}" data-reveal data-card-motion="${CARD_MOTIONS[post.art] || 'tilt'}" style="--i:${Number(index) % 8};--card-accent:${esc(GFS.productById(post.productId)?.colour || '#C9A227')}">
       <a class="journal-card-link" href="${link(post)}"><div class="journal-card-art">${art(post.art, true)}<span class="journal-category">${esc(post.category)}</span></div><div class="journal-card-copy"><div class="journal-meta"><time datetime="${esc(post.publishedAt)}">${date(post.publishedAt)}</time><span>${minutes(post)} min read</span></div><h3>${esc(post.title)}</h3><p>${esc(post.excerpt)}</p><span class="journal-read">Read article ${UI.icon('arrow')}</span></div></a>
       ${bookmark ? `<button class="bookmark-btn" type="button" data-bookmark="${esc(post.slug)}" data-title="${esc(post.title)}" aria-pressed="false" aria-label="Bookmark ${esc(post.title)}">${UI.icon('bookmark')}</button>` : ''}
     </article>`;

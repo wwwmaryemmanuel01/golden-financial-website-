@@ -154,7 +154,7 @@ const UI = (() => {
     return `<div class="stage-track">${stages.map((s, i) => `<div class="stage ${i < idx ? 'done' : i === idx ? 'current' : ''}">${stageNames[s] || s}</div>`).join('')}</div>`;
   }
   const productIcon = id => icon({ PL: 'user', BL: 'briefcase', EL: 'bolt', SA: 'wallet', AL: 'leaf', ED: 'graduation', ML: 'heart', AF: 'car', GL: 'users', MG: 'home' }[id] || 'wallet');
-  const notifIcon = cat => icon({ payment: 'card', disbursement: 'wallet', application: 'file', reminder: 'clock', overdue: 'alert', security: 'shield', kyc: 'id', welcome: 'user', settlement: 'check', support: 'headset', request: 'inbox' }[cat] || 'bell');
+  const notifIcon = cat => icon({ payment: 'card', disbursement: 'wallet', application: 'file', reminder: 'clock', overdue: 'alert', security: 'shield', kyc: 'id', welcome: 'user', settlement: 'check', support: 'headset', request: 'inbox', deposit: 'wallet', withdrawal: 'card', savings: 'chart', recommendation: 'sparkles', guarantor: 'users', collateral: 'home', document: 'documents' }[cat] || 'bell');
 
   const productLabel = p => typeof p === 'string' ? (GFS.productById(p, true)?.label || GFS.productById(p, true)?.name || p) : (p?.label || p?.name || '');
   return { productLabel, icon, esc, mk, mk2, date, datetime, toast, modal, confirmDialog, badge, table, empty, loading, skeleton, field, input, select, formData, bindForm, signaturePad, initials, progressBar, copy, download, stageTrack, productIcon, notifIcon };
