@@ -22,8 +22,8 @@ Brand emerald remains in supporting calls to action.
 ## Quick start
 
 Requires **Node.js ≥ 22.5** (built-in SQLite). The runtime has **zero production
-dependencies**. `npm install` is only needed for the optional browser smoke test
-(`jsdom` dev dependency).
+dependencies**. `npm install` is only needed for the optional smoke tests (`jsdom`, plus
+`playwright-core` / `@sparticuz/chromium` for manual real-browser layout checks).
 
 ```bash
 npm start                 # → http://localhost:3000
@@ -37,8 +37,8 @@ settings and a sandbox demo customer, and starts reminder/outbox/backup jobs.
 **Sandbox sign-in:** `demo@goldenfinancial.mw` / `Demo@1234`
 
 ```bash
-npm test                  # 57-assertion backend end-to-end test (mutates target DB)
-npm run test:browser      # jsdom smoke: 37 public + 21 portal routes, server + static modes
+npm test                  # 69-assertion backend end-to-end test (mutates target DB)
+npm run test:browser      # jsdom smoke: 37 public + 23 portal routes, server + static modes
 npm run test:pages        # 11 GitHub Pages packaging/content checks
 npm run test:catalog      # 13 non-destructive catalogue migration checks
 npm run backup            # encrypted SQLite + document backup with SHA-256 manifest
@@ -49,7 +49,7 @@ Run tests against an isolated instance, for example:
 
 ```bash
 GFS_DATA_DIR=/tmp/gfs-test GFS_DEMO_MODE=true PORT=3100 node server/index.js
-GFS_TEST_URL=http://127.0.0.1:3100 npm test
+GFS_TEST_URL=http://127.0.0.1:3100 GFS_TEST_INTEGRATION_KEY=$GFS_INTEGRATION_KEY npm test
 GFS_TEST_URL=http://127.0.0.1:3100 npm run test:browser
 ```
 
@@ -105,6 +105,68 @@ static sandbox labels its bundled library as device-local. It is not a fabricate
 news wire. `/guides`, `/security-centre`, `/borrowing-checklist`, `/complaints`
 and `/accessibility` add practical tools. Motion can be set to Full, Gentle or Off
 and respects reduced-motion preferences.
+
+### Loan calculator
+
+`/calculator` quotes a selected loan product with both repayment formulas:
+
+| Input | Default |
+|---|---|
+| Loan product | Personal (`PL`), from the published catalogue |
+| Amount | MWK 100,000 |
+| Interest rate | **1%** with an explicit per-month / per-year basis selector |
+| Processing fee | **5%** |
+| Duration | **1 month** |
+| Payment frequency | **Annually (1 year)** |
+| Method | Reducing balance (switch to Flat) |
+
+- **Flat:** interest = principal × periodic rate × number of months.
+- **Reducing:** annuity instalments on the declining balance, with the final
+  instalment absorbing rounding.
+- Term and payment frequency are independent: a one-month term paid annually
+  produces **one repayment at maturity**, not a twelve-month loan.
+- The result sheet prints the loan product, principal, interest rate, interest
+  amount, processing fee, duration, the full payment schedule **with due dates**
+  and the total repayment. The processing fee is deducted once at disbursement,
+  so total repayment is principal + interest while the total cost also includes
+  the fee. Quotes can be printed and exported.
+
+### Live announcement cards
+
+`/announcements` and the homepage announcement band are driven by the signed
+administration connector, not by hardcoded marketing copy.
+
+- `GET /api/announcements` returns `version`, `checkedAt`, `source`,
+  `publishingConfigured` and `adminSettingsUrl` (the admin
+  **Website content → announcements** screen).
+- Administrators publish the **complete** notice set through
+  `POST /api/integration/settings` (`announcements`). Omitting a notice
+  withdraws it; history is never deleted.
+- Each notice is validated: slug, title, body, category, optional start/expiry
+  window, and an internal `/path` or HTTPS link. Scheduled and expired notices
+  are hidden automatically; the UI polls every 30 seconds while visible.
+- The UI labels whether a notice is administration-published or device-local and
+  links to the admin publishing settings. Device-local notices are used only in
+  the GitHub Pages sandbox, where no backend exists.
+
+### Notification engine
+
+The portal bell (`/portal/notifications`) is wired to the backend notification
+engine. In-app notifications are deduplicated by `(customer, event key)` so a
+replayed connector event cannot spam the customer. Covered activity includes
+repayments, disbursement, application approval/rejection, agreements, deposits,
+savings, withdrawals, KYC/document/guarantor/collateral updates, support
+replies, system requests and recommendations. Each notification carries a link
+to the real portal record, and the page filters by activity category.
+
+### Account activity (read-only ledger)
+
+`POST /api/integration/account-activity` accepts signed administration reports
+(deposits, withdrawals, savings deposits/withdrawals and savings interest) with
+reference, amount, status, date and optional balance. Records are append-only,
+idempotent by reference + status, tagged `sandbox` or `production`, and notify
+the customer. `/portal/account-activity` shows them read-only, searchable and
+filterable — customers cannot create or edit activity.
 
 ### External services are not assumed live
 
@@ -215,5 +277,6 @@ integration/             Example connector configuration
   and system review; a dedicated guarantor-facing consent/OTP flow is still to be
   added.
 - Live mobile-money gateways, SMS/email providers and the admin connector must be
-  configured and verified before production use.
+  configured and verified before production use. Account activity, announcements and
+  notifications only appear once the signed connector reports them.
 - GitHub Pages mode is a local demonstration, not multi-device sync.

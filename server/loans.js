@@ -26,14 +26,17 @@ function assessmentFor(app, u, product) {
 }
 export async function calculator(ctx) {
   const b = { ...Object.fromEntries(ctx.url.searchParams), ...ctx.body };
-  const requestedProduct = b.productId || b.product;
-  const p = requestedProduct ? catalog.product(requestedProduct) : catalog.products()[0];
-  if (!p) throw new HttpError(400, 'This loan category is not available. Choose one of the five published products.');
-  const amount = cleanNum(b.amount, p.min), term = Number(b.term || b.termMonths || p.terms[0]);
-  const freq = b.freq || p.freqs[0];
-  if (amount < p.min || amount > p.max || !p.terms.includes(term) || !p.freqs.includes(freq)) throw new HttpError(400, 'Choose an amount, term and frequency within this product’s published limits.');
-  const schedule = GFS.amortize({ amount, monthlyPct: p.rate, termMonths: term, freq, feePct: p.fee });
-  return { product: { id: p.id, name: p.name, rate: p.rate, fee: p.fee }, inputs: { amount, term, freq }, schedule, note: 'Illustrative scheduled-interest estimate. Actual interest accrues daily on unpaid principal; early repayment reduces future interest.' };
+  const input = { ...GFS.CALCULATOR_DEFAULTS, productId: b.productId || b.product || GFS.CALCULATOR_DEFAULTS.productId,
+    amount: b.amount ?? GFS.CALCULATOR_DEFAULTS.amount, ratePct: b.ratePct ?? b.rate ?? GFS.CALCULATOR_DEFAULTS.ratePct,
+    ratePeriod: b.ratePeriod || GFS.CALCULATOR_DEFAULTS.ratePeriod, feePct: b.feePct ?? b.fee ?? GFS.CALCULATOR_DEFAULTS.feePct,
+    termMonths: b.termMonths ?? b.term ?? GFS.CALCULATOR_DEFAULTS.termMonths,
+    paymentFrequency: b.paymentFrequency || b.freq || GFS.CALCULATOR_DEFAULTS.paymentFrequency,
+    method: b.method || GFS.CALCULATOR_DEFAULTS.method, startDate: b.startDate || new Date() };
+  try {
+    const schedule = GFS.quoteLoan(input, { products: catalog.products() });
+    return { product: { id: schedule.productId, name: schedule.productName }, inputs: input, schedule,
+      note: 'Planning illustration only, not an offer. Applications use the product’s published terms and the signed agreement; actual interest accrues daily on unpaid principal.' };
+  } catch (e) { throw new HttpError(e.status || 400, e.message); }
 }
 export async function eligibility(ctx) {
   const b = ctx.body, u = ctx.user, p = catalog.product(b.productId || b.product);
@@ -110,11 +113,11 @@ export function decideApplication(appId, { approved, reason, source = 'system', 
         validUntil: dateOnly(GFS.addDays(new Date(), 14)), version: app.offer_version + 1, environment: source, ...offerOverrides };
       run(`UPDATE applications SET status='approved',stage='offer',offer=?,offer_version=?,decision_reason=?,review_source=?,updated_at=datetime('now') WHERE id=?`, JSON.stringify(offer), offer.version, reasonText, source, app.id);
       timeline(app, 'decision', `${source === 'sandbox' ? 'Sandbox approval' : 'Approved by the credit system'}: ${reasonText}`);
-      notify(u.id, { category: 'application', title: source === 'sandbox' ? 'Sandbox offer ready' : 'Your loan offer is ready', body: `${app.ref}: ${reasonText} Review the agreement before accepting.`, meta: { applicationId: app.id } });
+      notify(u.id, { category: 'application', title: source === 'sandbox' ? 'Sandbox offer ready' : 'Your loan offer is ready', body: `${app.ref}: ${reasonText} Review the agreement before accepting.`, meta: { applicationId: app.id, link:`/portal/applications/${app.id}` }, eventKey:`application:${app.id}:approved:${app.offer_version + 1}` });
     } else {
       run(`UPDATE applications SET status='rejected',stage='decision',decision_reason=?,review_source=?,updated_at=datetime('now') WHERE id=?`, reasonText, source, app.id);
       timeline(app, 'decision', reasonText);
-      notify(u.id, { category: 'application', title: 'Application decision', body: `${app.ref}: ${reasonText}`, meta: { applicationId: app.id } });
+      notify(u.id, { category: 'application', title: 'Application rejected', body: `${app.ref}: ${reasonText}`, meta: { applicationId: app.id, link:`/portal/applications/${app.id}` }, eventKey:`application:${app.id}:rejected:${app.offer_version}` });
     }
     audit(source === 'sandbox' ? 'sandbox' : 'system', null, approved ? 'application.approved' : 'application.rejected', 'application', app.id, null, { reason: reasonText, source }, null, null);
     return q1(`SELECT * FROM applications WHERE id=?`, app.id);
@@ -200,7 +203,7 @@ export async function acceptAgreement(ctx) {
   audit('customer', u.id, 'agreement.accepted', 'application', a.id, null, { termsHash: hash }, ctx.ip, ctx.ua);
   let loan = null;
   if (DEMO_MODE && offer.environment === 'sandbox') loan = createDisbursement(a.id, { source: 'sandbox', providerRef: `SANDBOX-${a.ref}` });
-  else notify(u.id, { category: 'application', title: 'Agreement received', body: `Your signed agreement for ${a.ref} is awaiting authorised disbursement. No money has been sent yet.`, meta: { applicationId: a.id } });
+  else notify(u.id, { category: 'application', title: 'Agreement received', body: `Your signed agreement for ${a.ref} is awaiting authorised disbursement. No money has been sent yet.`, meta: { applicationId: a.id, link:`/portal/applications/${a.id}` }, eventKey:`application:${a.id}:agreement` });
   return { application: serializeApp(q1(`SELECT * FROM applications WHERE id=?`, a.id)), loan, sandbox: DEMO_MODE && offer.environment === 'sandbox' };
 }
 export function createDisbursement(appId, { source = 'system', providerRef }) {
@@ -227,7 +230,7 @@ export function createDisbursement(appId, { source = 'system', providerRef }) {
     run(`UPDATE applications SET status='disbursed',stage='complete',updated_at=datetime('now') WHERE id=?`, a.id);
     timeline(a, 'disbursement', `${source === 'sandbox' ? 'SIMULATED — no real funds sent' : 'Provider-confirmed disbursement'}: ${GFS.mk(sched.netDisbursement)}. Loan ${ref}.`);
     audit(source === 'sandbox' ? 'sandbox' : 'system', null, 'loan.disbursed', 'loan', id, null, { ref, net: sched.netDisbursement, providerRef }, null, null);
-    notify(a.customer_id, { category: 'disbursement', title: source === 'sandbox' ? 'Sandbox loan activated' : 'Loan disbursement confirmed', body: `${source === 'sandbox' ? 'Demonstration only; no real money was sent. ' : ''}${ref}: net ${GFS.mk(sched.netDisbursement)}. Your schedule is available in the portal.`, meta: { loanId: id } });
+    notify(a.customer_id, { category: 'disbursement', title: source === 'sandbox' ? 'Sandbox loan activated' : 'Loan disbursement confirmed', body: `${source === 'sandbox' ? 'Demonstration only; no real money was sent. ' : ''}${ref}: net ${GFS.mk(sched.netDisbursement)}. Your schedule is available in the portal.`, meta: { loanId: id, link:`/portal/loans/${id}` }, eventKey:`loan:${id}:disbursed` });
     return serializeLoan(q1(`SELECT * FROM loans WHERE id=?`, id));
   });
 }

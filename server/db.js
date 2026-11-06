@@ -297,6 +297,30 @@ CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity, entity_id);
 CREATE INDEX IF NOT EXISTS idx_activity_customer ON activity_log(customer_id);
 `);
 
+/* Managed public notices and verified account activity. Existing notices remain
+   readable as history; only published, in-window notices reach the public API. */
+for (const [table, column, definition] of [
+  ['announcements','slug','TEXT'],['announcements','status',"TEXT NOT NULL DEFAULT 'published'"],
+  ['announcements','starts_at','TEXT'],['announcements','expires_at','TEXT'],['announcements','updated_at','TEXT'],
+  ['announcements','link_url','TEXT'],['announcements','link_label','TEXT'],['announcements','source',"TEXT NOT NULL DEFAULT 'seed'"],
+  ['notifications','event_key','TEXT']
+]) { if (!db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); }
+db.exec(`UPDATE announcements SET slug='legacy-' || id WHERE slug IS NULL;
+UPDATE announcements SET updated_at=published_at || 'T00:00:00.000Z' WHERE updated_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_announcements_slug ON announcements(slug);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_event ON notifications(customer_id,event_key) WHERE event_key IS NOT NULL AND channel='inapp';
+CREATE TABLE IF NOT EXISTS account_activities (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL REFERENCES customers(id),
+ type TEXT NOT NULL, amount REAL NOT NULL CHECK(amount>0), reference TEXT NOT NULL,
+ status TEXT NOT NULL CHECK(status IN ('completed','rejected','pending')),
+ account_ref TEXT, balance_after REAL, description TEXT, source TEXT NOT NULL DEFAULT 'system',
+ environment TEXT NOT NULL DEFAULT 'production', occurred_at TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+ UNIQUE(source,reference,status)
+);
+CREATE INDEX IF NOT EXISTS idx_account_activity_customer ON account_activities(customer_id,occurred_at);
+CREATE TRIGGER IF NOT EXISTS account_activity_no_update BEFORE UPDATE ON account_activities BEGIN SELECT RAISE(ABORT,'Account activity is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS account_activity_no_delete BEFORE DELETE ON account_activities BEGIN SELECT RAISE(ABORT,'Account activity is immutable'); END;`);
+
 /* ---------------- helpers ---------------- */
 export const q = (sql, ...params) => db.prepare(sql).all(...params);
 export const q1 = (sql, ...params) => db.prepare(sql).get(...params);

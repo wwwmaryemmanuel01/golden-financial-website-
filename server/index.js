@@ -44,7 +44,9 @@ const server = http.createServer(async (req, res) => {
       let body = {}, rawBody = Buffer.alloc(0);
       if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
         rawBody = await readBody(req, signedPath(pathname) ? 1024 * 1024 : 12 * 1024 * 1024);
-        if (!signedPath(pathname)) { try { body = rawBody.length ? JSON.parse(rawBody.toString('utf8')) : {}; } catch { throw new HttpError(400, 'Invalid JSON body.'); } if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Expected a JSON object.'); }
+        // Signed handlers verify the HMAC over rawBody before trusting parsed JSON.
+        try { body = rawBody.length ? JSON.parse(rawBody.toString('utf8')) : {}; } catch { throw new HttpError(400, 'Invalid JSON body.'); }
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Expected a JSON object.');
       }
       const ctx = { req, res, url, params: match.params, body, rawBody, user, ip, ua };
       const result = await match.handler(ctx);

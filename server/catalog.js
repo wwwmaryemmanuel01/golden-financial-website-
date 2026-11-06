@@ -1,5 +1,5 @@
 /* Read-through access to centrally managed settings. Customer APIs never write here. */
-import { getSetting } from './db.js';
+import { getSetting, setSetting, q, run, tx } from './db.js';
 import GFS from '../shared/core.mjs';
 import CONTENT from '../shared/content.mjs';
 import { HttpError } from './http.js';
@@ -7,6 +7,16 @@ export const products = () => getSetting('products', GFS.PRODUCTS);
 export const product = id => products().find(p => p.id === id);
 // Historical-only lookup: never use this for new applications or public discovery.
 export const recordProduct = id => product(id) || GFS.productById(id, true);
+export const announcements = () => q(`SELECT slug,title,body,category,pinned,published_at,starts_at,expires_at,updated_at,link_url,link_label,source FROM announcements WHERE status='published' AND (starts_at IS NULL OR starts_at<=datetime('now')) AND (expires_at IS NULL OR expires_at>datetime('now')) ORDER BY pinned DESC,published_at DESC,slug`).map(a => ({ id:a.slug, slug:a.slug, title:a.title, body:a.body, category:a.category, pinned:!!a.pinned, publishedAt:a.published_at, startsAt:a.starts_at, expiresAt:a.expires_at, updatedAt:a.updated_at, linkUrl:a.link_url, linkLabel:a.link_label, source:a.source }));
+export function publishAnnouncements(items) {
+  return tx(() => {
+    const at = new Date().toISOString();
+    // The supplied set is authoritative. Omitted notices are withdrawn, never erased.
+    run(`UPDATE announcements SET status='withdrawn',updated_at=? WHERE status='published'`, at);
+    for (const a of items) run(`INSERT INTO announcements(slug,title,body,category,pinned,published_at,starts_at,expires_at,updated_at,link_url,link_label,status,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,'published','system') ON CONFLICT(slug) DO UPDATE SET title=excluded.title,body=excluded.body,category=excluded.category,pinned=excluded.pinned,published_at=excluded.published_at,starts_at=excluded.starts_at,expires_at=excluded.expires_at,updated_at=excluded.updated_at,link_url=excluded.link_url,link_label=excluded.link_label,status='published',source='system'`, a.id,a.title,a.body,a.category,a.pinned?1:0,a.publishedAt,a.startsAt,a.expiresAt,at,a.linkUrl,a.linkLabel);
+    setSetting('announcements_revision', at);
+  });
+}
 export const blogPosts = () => getSetting('blog_posts', CONTENT.BLOG_POSTS);
 export const rules = () => ({ ...GFS.RULES, ...getSetting('rules', {}) });
 export const methods = () => getSetting('payment_methods', GFS.PAYMENT_METHODS);
@@ -15,8 +25,30 @@ export const company = () => getSetting('company', GFS.COMPANY);
 const finite = (n, min, max) => Number.isFinite(Number(n)) && Number(n) >= min && Number(n) <= max;
 export function validateSettingsPatch(b) {
   if (!b || typeof b !== 'object' || Array.isArray(b)) throw new HttpError(400, 'Expected a settings object.');
-  const allowed = ['company', 'products', 'payment_methods', 'branches', 'theme', 'rules', 'blog_posts'];
+  const allowed = ['company', 'products', 'payment_methods', 'branches', 'theme', 'rules', 'blog_posts', 'announcements'];
   if (Object.keys(b).some(k => !allowed.includes(k))) throw new HttpError(400, 'Unknown system setting.');
+  if (b.announcements !== undefined) {
+    if (!Array.isArray(b.announcements) || b.announcements.length > 50) throw new HttpError(400, 'Publish at most 50 announcements.');
+    const ids = new Set();
+    b.announcements = b.announcements.map(a => {
+      if (!a || typeof a !== 'object') throw new HttpError(400, 'Invalid announcement.');
+      const id = typeof a.id === 'string' ? a.id.trim() : '', title = typeof a.title === 'string' ? a.title.trim() : '', body = typeof a.body === 'string' ? a.body.trim() : '', category = a.category || 'general';
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) || id.length < 2 || id.length > 100 || ids.has(id)) throw new HttpError(400, 'Each announcement needs a unique lowercase slug (2–100 characters).');
+      ids.add(id);
+      if (title.length < 3 || title.length > 140 || body.length < 10 || body.length > 4000) throw new HttpError(400, 'Announcement titles need 3–140 characters and messages 10–4000.');
+      if (!['general','service','product','security','maintenance','promotion'].includes(category)) throw new HttpError(400, 'Invalid announcement category.');
+      const date = (v, label) => { if (v == null || v === '') return null; if (typeof v !== 'string' || !Number.isFinite(Date.parse(v))) throw new HttpError(400, `Invalid ${label}.`); return new Date(v).toISOString(); };
+      const publishedAt = date(a.publishedAt || new Date().toISOString(), 'publication date'), startsAt = date(a.startsAt, 'start date'), expiresAt = date(a.expiresAt, 'expiry date');
+      if (startsAt && expiresAt && expiresAt <= startsAt) throw new HttpError(400, 'Announcement expiry must follow its start.');
+      let linkUrl = a.linkUrl == null ? '' : String(a.linkUrl).trim(), linkLabel = a.linkLabel == null ? 'Read more' : String(a.linkLabel).trim();
+      if (linkUrl.length > 600 || linkLabel.length > 60) throw new HttpError(400, 'Announcement link is too long.');
+      if (linkUrl) {
+        if (/^\/(?!\/)/.test(linkUrl)) { if (/[\\\r\n]/.test(linkUrl) || linkUrl.includes('#')) throw new HttpError(400, 'Internal links must be customer-site paths without fragments.'); }
+        else { let u; try { u = new URL(linkUrl); } catch { throw new HttpError(400, 'Announcement links must be internal paths or HTTPS URLs.'); } if (u.protocol !== 'https:' || u.username || u.password) throw new HttpError(400, 'External announcement links must use HTTPS without credentials.'); linkUrl = u.href; }
+      }
+      return { id, title, body, category, pinned:a.pinned === true, publishedAt, startsAt, expiresAt, linkUrl:linkUrl || null, linkLabel };
+    });
+  }
   if (b.products !== undefined) {
     if (!Array.isArray(b.products) || b.products.length !== GFS.PRODUCTS.length || new Set(b.products.map(p => p.id)).size !== GFS.PRODUCTS.length) throw new HttpError(400, 'Publish exactly the five supported loan categories, each once.');
     for (const p of b.products) {

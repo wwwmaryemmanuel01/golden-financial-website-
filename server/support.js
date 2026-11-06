@@ -1,13 +1,13 @@
 /* Honest automated assistance + persistent human-support tickets.
    A bot acknowledgement is never labelled as a human agent. */
-import { q, q1, run, tx, nextSeq, audit, json } from './db.js';
+import { q, q1, run, tx, nextSeq, audit, json, getSetting } from './db.js';
 import { HttpError } from './http.js';
 import { clean } from './security.js';
 import { requireAuth } from './auth.js';
 import { notify } from './notifications.js';
 import { enqueue } from './events.js';
 import * as catalog from './catalog.js';
-import { AI_API_URL, AI_API_KEY } from './config.js';
+import { AI_API_URL, AI_API_KEY, SYSTEM_URL, INTEGRATION_KEY } from './config.js';
 import GFS from '../shared/core.mjs';
 function botAnswer(u, message) {
   const m = message.toLowerCase(), has = (...words) => words.some(w => m.includes(w));
@@ -82,4 +82,6 @@ export async function closeTicket(ctx) {
   tx(() => { run(`UPDATE tickets SET status='closed',updated_at=datetime('now') WHERE id=?`, t.id); if (ctx.body.rating !== undefined) { if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw new HttpError(400, 'Rating must be from 1 to 5.'); run(`INSERT INTO ticket_messages(ticket_id,sender,sender_name,body) VALUES(?,?,?,?)`, t.id, 'customer', `${u.first_name} ${u.last_name}`, `Feedback ${rating}/5: ${clean(ctx.body.feedback, 1000)}`); } });
   return { ok: true };
 }
-export async function listAnnouncements() { return { announcements: q(`SELECT id,title,body,category,pinned,published_at FROM announcements ORDER BY pinned DESC,id DESC LIMIT 50`) }; }
+export async function listAnnouncements() {
+  return { announcements:catalog.announcements(), version:getSetting('announcements_revision', 'legacy'), checkedAt:new Date().toISOString(), source:'backend', publishingConfigured:INTEGRATION_KEY.length >= 32, adminSettingsUrl:new URL('website.html#s3', SYSTEM_URL).href };
+}

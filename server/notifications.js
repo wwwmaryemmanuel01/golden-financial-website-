@@ -18,7 +18,8 @@ async function forward(id, channel, payload) {
     run(`UPDATE notifications SET delivery_status='accepted',provider_message_id=? WHERE id=?`, String(result.messageId || id).slice(0, 150), id);
   } catch (e) { run(`UPDATE notifications SET delivery_status='failed',delivery_error=? WHERE id=?`, String(e.message).slice(0, 200), id); }
 }
-export function notify(customerId, { category = 'general', title, body, channels = ['inapp', 'sms', 'email'], meta = {} }) {
+export function notify(customerId, { category = 'general', title, body, channels = ['inapp', 'sms', 'email'], meta = {}, eventKey = null }) {
+  if (eventKey && q1(`SELECT id FROM notifications WHERE customer_id=? AND event_key=? AND channel='inapp'`, customerId, eventKey)) return [];
   const c = q1(`SELECT email,phone,prefs FROM customers WHERE id=?`, customerId);
   if (!c) return [];
   const prefs = json(c.prefs, {}), jobs = [];
@@ -27,7 +28,7 @@ export function notify(customerId, { category = 'general', title, body, channels
   for (const ch of wanted) {
     if (!['inapp', 'sms', 'email'].includes(ch) || (ch !== 'inapp' && prefs[ch] === false) || (category === 'reminder' && ch !== 'inapp' && prefs.reminders === false)) continue;
     const status = ch === 'inapp' ? 'delivered' : deliveryConfigured(ch) ? 'queued' : 'not_configured';
-    const id = Number(run(`INSERT INTO notifications(customer_id,channel,category,title,body,meta,delivery_status,delivered_at) VALUES(?,?,?,?,?,?,?,CASE WHEN ?='delivered' THEN datetime('now') ELSE NULL END)`, customerId, ch, category, title, body, JSON.stringify(meta), status, status).lastInsertRowid);
+    const id = Number(run(`INSERT INTO notifications(customer_id,channel,category,title,body,meta,delivery_status,delivered_at,event_key) VALUES(?,?,?,?,?,?,?,CASE WHEN ?='delivered' THEN datetime('now') ELSE NULL END,?)`, customerId, ch, category, title, body, JSON.stringify(meta), status, status, ch === 'inapp' ? eventKey : null).lastInsertRowid);
     if (ch !== 'inapp' && status === 'queued') jobs.push(forward(id, ch, ch === 'sms' ? { to: c.phone, from: SMS_SENDER, message: `${title}: ${body}`, category } : { to: c.email, subject: title, text: body, category }));
   }
   // Network work never runs inside a database transaction.

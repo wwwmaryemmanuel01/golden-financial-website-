@@ -64,6 +64,12 @@ async function exercisePublic(window, label) {
   await nav(window, '#/security-centre');
   d.querySelector('.quiz-answer[data-answer="0"]').click();
   assert(!d.querySelector('.quiz-feedback').hidden, label + ': security quiz feedback missing');
+  await nav(window, '#/calculator');
+  const cf = d.querySelector('#calc-form');
+  assert(cf.elements.ratePct.value === '1' && cf.elements.feePct.value === '5' && cf.elements.termMonths.value === '1' && cf.elements.paymentFrequency.value === 'annually', label + ': calculator defaults missing');
+  await nav(window, '#/announcements');
+  assert(d.querySelector('.notice-card a[href^="#/announcements/"]'), label + ': announcement detail link missing');
+  assert(d.querySelector('.notice-source a[href*="website.html#s3"]'), label + ': admin publishing settings link missing');
   await nav(window, '#/');
   const drop = d.querySelector('[data-drop="loans-menu"]'); drop.click();
   assert(drop.getAttribute('aria-expanded') === 'true', label + ': dropdown did not open');
@@ -86,11 +92,13 @@ async function exercisePublic(window, label) {
   await exercisePublic(w, 'server');
   const login = await w.eval("API").post('/api/auth/login', { email: 'demo@goldenfinancial.mw', password: 'Demo@1234' });
   w.eval("API").setToken(login.token); w.eval("App").user = login.user; await w.eval("App").refreshUser();
-  const portalRoutes = ['/portal', '/portal/loans', '/portal/applications', '/portal/apply', '/portal/transactions', '/portal/receipts', '/portal/statements', '/portal/requests', '/portal/profile', '/portal/documents', '/portal/guarantors', '/portal/collateral', '/portal/security', '/portal/settings', '/portal/chat', '/portal/support', '/portal/notifications', '/portal/payments', '/portal/analytics'];
+  const portalRoutes = ['/portal', '/portal/loans', '/portal/applications', '/portal/apply', '/portal/transactions', '/portal/receipts', '/portal/statements', '/portal/requests', '/portal/profile', '/portal/documents', '/portal/guarantors', '/portal/collateral', '/portal/security', '/portal/settings', '/portal/chat', '/portal/support', '/portal/notifications', '/portal/payments', '/portal/analytics', '/portal/account-activity', '/portal/activity'];
   for (const r of portalRoutes) await nav(w, '#' + r);
   await nav(w, '#/portal/apply');
   assert(w.document.querySelectorAll('#apply-form select[name="productId"] option').length === 5, 'portal application must offer exactly five products');
   assert(w.document.querySelector('.topbar.admin-topbar'), 'portal dark topbar missing');
+  assert(w.document.querySelector('.portal-footer nav a[href="#/portal/notifications"]'), 'portal footer navigation missing');
+  assert(w.document.querySelector('#notif-btn'), 'notification bell missing');
   const loan = (await w.eval("API").get('/api/loans')).loans.find(l => l.status === 'active');
   if (loan) await nav(w, '#/portal/loans/' + loan.id);
   const app = (await w.eval("API").get('/api/applications')).applications[0];
@@ -118,7 +126,7 @@ async function exercisePublic(window, label) {
   await w2.eval("API").post('/api/auth/verify-otp', { purpose: 'verify_email', challenge: reg.challenges.email, code: reg.devCodes.email });
   const li = await w2.eval("API").post('/api/auth/login', { email: 'static@example.com', password: 'Static@1234' });
   w2.eval("API").setToken(li.token); w2.eval("App").user = li.user; await w2.eval("App").refreshUser();
-  for (const r of ['/portal', '/portal/apply', '/portal/payments', '/portal/analytics', '/portal/profile', '/portal/documents', '/portal/security']) await nav(w2, '#' + r);
+  for (const r of ['/portal', '/portal/apply', '/portal/payments', '/portal/analytics', '/portal/profile', '/portal/documents', '/portal/security', '/portal/account-activity', '/portal/notifications', '/portal/settings']) await nav(w2, '#' + r);
   await nav(w2, '#/portal/apply');
   assert(w2.document.querySelectorAll('#apply-form select[name="productId"] option').length === 5, 'static portal application must offer exactly five products');
   console.log('STATIC_SMOKE_OK', { mode: w2.eval("API").mode, errors });
