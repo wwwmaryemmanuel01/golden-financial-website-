@@ -37,6 +37,7 @@ settings and a sandbox demo customer, and starts reminder/outbox/backup jobs.
 ```bash
 npm test                  # 52-assertion backend end-to-end test (mutates target DB)
 npm run test:browser      # jsdom smoke: 23 public + 21 portal routes, server + static modes
+npm run test:pages        # verify the GitHub Pages entrypoint and packaged assets
 npm run backup            # encrypted SQLite + document backup with SHA-256 manifest
 npm run seed              # add the demo customer if missing
 ```
@@ -50,6 +51,25 @@ GFS_TEST_URL=http://127.0.0.1:3100 npm run test:browser
 ```
 
 ---
+
+## GitHub Pages publishing
+
+The website is **`public/index.html`**, not the repository README. The deployment
+workflow packages **only `public/`**, checks its scripts/styles/assets, and uploads
+that folder as the Pages artifact. The preferred repository setting is
+**Settings → Pages → Build and deployment → Source: GitHub Actions**.
+
+The current branch-root Pages configuration is also supported: root `index.html`
+opens `public/` and preserves deep links, while root `.nojekyll` disables Jekyll
+processing. This prevents the repository README from appearing instead of the
+website. No source code or database is included in the Actions website artifact.
+
+```bash
+npm run test:pages   # checks both publishing layouts and offline-shell assets
+```
+
+After a publishing change, allow the deployment to finish and refresh the page.
+GitHub Pages can briefly cache the previous homepage.
 
 ## Modes — read this before deploying
 
@@ -95,6 +115,8 @@ configured and successful, `/api/integration/status` reports `connected: false`.
 ## Architecture
 
 ```
+index.html               Root-Pages entrypoint → public/ (preserves deep links)
+.nojekyll                Disable Jekyll for branch-root publishing
 public/                  Static frontend (no build step) — GitHub Pages compatible
   index.html             SPA shell
   css/theme.css          Base design tokens/components

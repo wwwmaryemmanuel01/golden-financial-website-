@@ -10,7 +10,8 @@
     "seed": "node server/seed.js --force",
     "backup": "node server/backup.js",
     "test": "node tests/run.js",
-    "test:browser": "node tests/browser-smoke.cjs"
+    "test:browser": "node tests/browser-smoke.cjs",
+    "test:pages": "node tests/pages-entrypoint.js"
   },
   "engines": {
     "node": ">=22.5.0"
