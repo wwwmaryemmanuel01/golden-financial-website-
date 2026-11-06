@@ -132,11 +132,12 @@ html[data-motion="off"]{scroll-behavior:auto}html[data-motion="off"] .will-revea
 @media print{.utility-bar,.site-header,.site-footer,.reader-toolbar,.article-aside,.article-neighbours,.related-articles,.article-product-cta,.journal-hero-visual,.resource-emblem,.motion-control,.bookmark-btn,.checklist-summary .btn,.checklist-summary .btn-link,#toasts,.modal-back,.skip-link{display:none!important}.journal-hero,.resource-hero{background:#fff!important;color:#222;border-bottom:1px solid #bbb;padding:20px 0}.journal-hero h1,.resource-hero h1,.article-byline b{color:#111}.journal-hero p,.resource-hero p,.article-byline div>span{color:#444}.journal-hero-grid,.resource-hero-grid,.article-layout,.checklist-layout{display:block}.article-layout{padding:20px 0}.article-reading-shell{--reader-size:12pt!important}.article-section{scroll-margin-top:0}.article-section h2{break-after:avoid}.article-section p{font-size:12pt;line-height:1.6}.will-reveal{opacity:1!important;transform:none!important}.checklist-summary{position:static;box-shadow:none;margin-top:20px}.checklist-ring{display:none}.checklist-group{break-inside:avoid}.container{max-width:none;padding:0}.section{padding:20px 0}body{background:#fff}.article-takeaway{background:#f5f5f5;border-color:#bbb}.article-takeaway p{color:#222}}
 
 /* Professional polish: contained editorial motion and a non-overlapping library. */
-.hero-visual{isolation:isolate;overflow:hidden;border-radius:28px;background:#0F1115;border:1px solid #2F3541;min-height:400px;box-shadow:0 28px 70px -38px rgba(0,0,0,.8)}
-.hero-logo-seal{background:#0F1115!important;box-shadow:none!important;border:0;width:270px;height:270px}
-.hero-logo-seal img{width:88%;filter:drop-shadow(0 8px 18px rgba(201,162,39,.16))}
+/* The dark system colour belongs to the emblem ring only — the hero card itself stays transparent. */
+.hero-visual{isolation:isolate;min-height:400px;background:none;border:0;box-shadow:none;overflow:visible}
+.hero-logo-seal{width:270px;height:270px;border-radius:50%;background:radial-gradient(circle at 34% 26%,#1B1F27,#0F1115 72%)!important;box-shadow:0 26px 60px -28px rgba(0,0,0,.55),0 0 0 1px rgba(201,162,39,.45),0 0 0 12px rgba(201,162,39,.10)!important;border:0}
+.hero-logo-seal img{width:80%;filter:drop-shadow(0 8px 18px rgba(201,162,39,.22))}
 .hero-orbit{border-color:rgba(232,200,96,.28)}.orbit-one{animation:orbit-spin 48s linear infinite}.orbit-two{border-color:rgba(232,200,96,.16)}
-.floating-card{background:#1B1F27;color:#F4F6F8;border:1px solid #2F3541;box-shadow:0 18px 40px -22px rgba(0,0,0,.8)}.floating-card small{color:#A6ADBB}.floating-card .icon{color:#E8C860}
+
 .journal-filters{position:relative;z-index:3;display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:end;gap:14px;margin-bottom:20px}
 .journal-filters .search-field{min-width:0;width:100%;max-width:none}.journal-filters .search-field input{min-width:0}.journal-sort{min-width:0}.journal-sort select{max-width:100%}
 .journal-grid{position:relative;z-index:1;align-items:stretch;margin-top:24px;isolation:isolate}.journal-card{min-width:0}.journal-card:hover,.journal-card.will-reveal.is-visible:hover{transform:none;box-shadow:0 18px 36px -24px rgba(15,17,21,.45);border-color:#CBB76E}

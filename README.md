@@ -39,7 +39,7 @@ settings and a sandbox demo customer, and starts reminder/outbox/backup jobs.
 ```bash
 npm test                  # 69-assertion backend end-to-end test (mutates target DB)
 npm run test:browser      # jsdom smoke: 37 public + 23 portal routes, server + static modes
-npm run test:pages        # 11 GitHub Pages packaging/content checks
+npm run test:pages        # 13 GitHub Pages packaging/content checks
 npm run test:catalog      # 13 non-destructive catalogue migration checks
 npm run backup            # encrypted SQLite + document backup with SHA-256 manifest
 npm run seed              # add the demo customer if missing

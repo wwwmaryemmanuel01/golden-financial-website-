@@ -100,4 +100,26 @@ check('public catalogue contains exactly the five requested categories', () => {
   assert.ok(core.productById('ED', true));
   assert.ok(!/Compare all ten|Choose from ten|Ten loan products/.test(read('public/js/public-pages.js')));
 });
+check('the notification layer can never swallow taps on the page', () => {
+  const theme = read('public/css/theme.css'), rebuild = read('public/css/rebuild.css');
+  const rules = (css, selector) => [...css.matchAll(new RegExp('(?:^|[},])\\s*' + selector.replace(/([.#])/g, '\\$1') + '\\s*{([^}]*)}', 'g'))].map(m => m[1]);
+  const toastLayer = [...rules(theme, '#toasts'), ...rules(rebuild, '#toasts')].join(';');
+  assert.match(toastLayer, /pointer-events:\s*none/, 'The toast container is fixed and must not intercept pointer events.');
+  assert.match(rebuild, /\.toast\{[^}]*pointer-events:\s*none/, 'Toasts are informational and must not intercept taps either.');
+  // A fixed layer anchored on both edges stretches over the whole viewport.
+  for (const layer of rules(rebuild, '#toasts')) assert.match(layer, /top:\s*auto/, 'The toast layer must not be anchored to both the top and the bottom.');
+});
+check('the homepage emblem keeps the dark system colour inside the ring only', () => {
+  const css = read('public/css/experience.css'), home = read('public/js/public-pages.js');
+  const seal = css.match(/\.hero-logo-seal\{([^}]*)\}/)[1], visual = css.match(/\.hero-visual\{([^}]*)\}/)[1];
+  assert.match(seal, /border-radius:\s*50%/, 'The dark background must be bounded by the circle.');
+  assert.match(seal, /#0F1115|#1B1F27/, 'The emblem ring keeps the system header colour.');
+  assert.match(visual, /background:\s*none/, 'The hero card itself must not be filled with the dark colour.');
+  const emblem = home.match(/<div class="hero-logo-seal"><img src="assets\/([^"]+)"/);
+  assert.ok(emblem);
+  const logo = emblem[1];
+  const opaque = (() => { try { return fs.readFileSync(path.join(root, 'public/assets', logo)).length; } catch { return 0; } })();
+  assert.ok(opaque > 0, `Missing emblem asset: ${logo}`);
+  assert.match(home, /hero-logo-seal"><img src="assets\/logo\.png"/, 'The transparent emblem must sit on the dark ring, not an opaque black plate.');
+});
 console.log(`\n  ${checks} GitHub Pages packaging checks passed.\n`);
