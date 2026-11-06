@@ -11,6 +11,7 @@ import * as documents from './documents.js';
 import * as support from './support.js';
 import * as statements from './statements.js';
 import * as integration from './integration.js';
+import * as content from './content.js';
 import { listNotifications, unreadCount, markRead, markAllRead } from './notifications.js';
 import GFS from '../shared/core.mjs';
 
@@ -21,6 +22,8 @@ router.get('/api/health', integration.health);
 router.get('/api/config', integration.publicConfig);
 router.get('/api/integration/status', integration.status);
 router.get('/api/products', async () => ({ products: catalog.products() }));
+router.get('/api/blog/posts', content.listPosts);
+router.get('/api/blog/posts/:slug', content.getPost);
 router.get('/api/branches', async () => ({ branches: getSetting('branches', GFS.BRANCHES) }));
 router.get('/api/faqs', async () => ({ faqs: GFS.FAQS }));
 router.get('/api/testimonials', async () => ({ testimonials: GFS.TESTIMONIALS }));

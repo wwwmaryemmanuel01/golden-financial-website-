@@ -9,8 +9,10 @@ JSON unless noted (PDF). Authenticated endpoints use the session cookie or
 |---|---|---|
 | GET | `/api/health` | Service + database health, record counts |
 | GET | `/api/config` | Company, products, rates, payment methods, branches, theme, announcements (read-only) |
-| GET | `/api/products` · `/api/branches` · `/api/faqs` · `/api/testimonials` · `/api/announcements` · `/api/agreement-clauses` | Public content |
-| GET/POST | `/api/calculator` | Amortisation: `{productId, amount, term, freq, rate?, feePct?, startDate?}` |
+| GET | `/api/products` · `/api/branches` · `/api/faqs` · `/api/testimonials` · `/api/announcements` · `/api/agreement-clauses` | Public content; products are exactly the five active categories |
+| GET | `/api/blog/posts` | Published article summaries; optional `search` and `category`; source label |
+| GET | `/api/blog/posts/:slug` | Article detail, previous/next and related summaries |
+| GET/POST | `/api/calculator` | Amortisation: `{productId, amount, term, freq}`. Explicit unknown/retired product IDs return 400; omitting productId defaults to the first active category. |
 | POST | `/api/eligibility` | Affordability assessment: `{productId, amount, term, income, expenses, guarantors?, collateralValue?}` |
 | GET | `/api/payment-methods` | Rails + instructions |
 | GET | `/api/integration/status` | Linked-system info |

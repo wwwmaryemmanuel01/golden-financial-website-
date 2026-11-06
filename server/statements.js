@@ -71,7 +71,7 @@ export async function loanStatementPDF(ctx) {
   const u = requireAuth(ctx);
   const l = q1(`SELECT * FROM loans WHERE id = ? AND customer_id = ?`, Number(ctx.params.id), u.id);
   if (!l) throw new HttpError(404, 'Loan not found.');
-  const product = GFS.productById(l.product_id);
+  const product = GFS.productById(l.product_id, true);
   const rows = q(`SELECT * FROM schedule WHERE loan_id = ? ORDER BY no`, l.id);
   const txns = q(`SELECT * FROM transactions WHERE loan_id = ? AND status = 'verified' ORDER BY id ASC`, l.id);
   const ref = GFS.refs.statement();
@@ -178,7 +178,7 @@ export async function agreementPDF(ctx) {
   const signedTerms = acceptance ? json(acceptance.terms_json) : null;
   const offer = signedTerms?.offer || json(a.offer, null);
   const clauses = signedTerms?.clauses || GFS.AGREEMENT_CLAUSES;
-  const product = GFS.productById(a.product_id);
+  const product = GFS.productById(a.product_id, true);
   const pdf = new PDF({ title: `Loan agreement ${a.ref}` });
   pdf.header(C.name, 'Loan Agreement', a.ref);
   if (offer?.environment === 'sandbox') pdf.text('SANDBOX DEMONSTRATION — NOT A LIVE CREDIT CONTRACT', { size: 10, bold: true, color: [0.7, 0.2, 0.1] });

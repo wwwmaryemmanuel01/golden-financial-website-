@@ -1,5 +1,7 @@
 /* Idempotent migrations for existing customer databases; never discard customer data. */
-import { db, q, run, audit } from './db.js';
+import { db, q, q1, run, audit, getSetting, setSetting } from './db.js';
+import GFS from '../shared/core.mjs';
+import CONTENT from '../shared/content.mjs';
 export function migrate() {
   const columns = (table, additions) => {
     const existing = new Set(q(`PRAGMA table_info(${table})`).map(c => c.name));
@@ -83,4 +85,30 @@ export function migrate() {
   run(`UPDATE notifications SET delivery_status = 'delivered' WHERE channel = 'inapp'`);
   // Sample passwords and documents must never be mistaken for a live customer book.
   run(`UPDATE transactions SET environment = 'sandbox' WHERE json_extract(meta, '$.sandbox') = 1`);
+  // Withdraw retired categories without deleting or rewriting any loan/application.
+  const storedProducts = getSetting('products');
+  if (Array.isArray(storedProducts)) {
+    const published = GFS.PRODUCTS.map(base => {
+      const prior = storedProducts.find(p => p.id === base.id);
+      return prior ? { ...base, ...prior, id: base.id, name: base.name, label: base.label } : { ...base };
+    });
+    if (JSON.stringify(storedProducts) !== JSON.stringify(published)) {
+      setSetting('products', published);
+      setSetting('catalog_version', GFS.CATALOG_VERSION);
+      setSetting('config_version', getSetting('config_version', 1) + 1);
+      audit('system', null, 'catalog.five_categories', 'settings', 'products', { ids: storedProducts.map(p => p.id) }, { ids: published.map(p => p.id), retainedRecords: true }, null, null);
+    }
+  }
+  if (!getSetting('blog_posts')) setSetting('blog_posts', CONTENT.BLOG_POSTS);
+  const theme = getSetting('theme', {});
+  const darkHeader = { header: '#0F1115', headerSurface: '#171A21', headerBorder: '#23262E', headerGold: '#E4C264' };
+  if (Object.entries(darkHeader).some(([k,v]) => theme[k] !== v)) setSetting('theme', { ...theme, ...darkHeader });
+  // A retired pending application needs human guidance, not a broken automatic review.
+  const retiredIds = GFS.ARCHIVED_PRODUCTS.map(p => p.id);
+  const placeholders = retiredIds.map(() => '?').join(',');
+  for (const a of q(`SELECT id,ref,product_id FROM applications WHERE status IN ('submitted','pending_documents','under_review','approved','agreement_accepted') AND product_id IN (${placeholders}) AND (decision_reason IS NULL OR decision_reason NOT LIKE 'This product is no longer available%')`, ...retiredIds)) {
+    const reason = 'This product is no longer available for new applications. Your record is retained; contact support to review an available category. No automatic approval or disbursement will be made.';
+    run(`UPDATE applications SET status='under_review',stage='verification',decision_reason=?,updated_at=datetime('now') WHERE id=?`, reason, a.id);
+    audit('system', null, 'application.product_retired', 'application', a.id, { productId: a.product_id }, { reason }, null, null);
+  }
 }

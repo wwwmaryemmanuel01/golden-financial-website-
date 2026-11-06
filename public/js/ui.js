@@ -156,5 +156,6 @@ const UI = (() => {
   const productIcon = id => icon({ PL: 'user', BL: 'briefcase', EL: 'bolt', SA: 'wallet', AL: 'leaf', ED: 'graduation', ML: 'heart', AF: 'car', GL: 'users', MG: 'home' }[id] || 'wallet');
   const notifIcon = cat => icon({ payment: 'card', disbursement: 'wallet', application: 'file', reminder: 'clock', overdue: 'alert', security: 'shield', kyc: 'id', welcome: 'user', settlement: 'check', support: 'headset', request: 'inbox' }[cat] || 'bell');
 
-  return { icon, esc, mk, mk2, date, datetime, toast, modal, confirmDialog, badge, table, empty, loading, skeleton, field, input, select, formData, bindForm, signaturePad, initials, progressBar, copy, download, stageTrack, productIcon, notifIcon };
+  const productLabel = p => typeof p === 'string' ? (GFS.productById(p, true)?.label || GFS.productById(p, true)?.name || p) : (p?.label || p?.name || '');
+  return { productLabel, icon, esc, mk, mk2, date, datetime, toast, modal, confirmDialog, badge, table, empty, loading, skeleton, field, input, select, formData, bindForm, signaturePad, initials, progressBar, copy, download, stageTrack, productIcon, notifIcon };
 })();
