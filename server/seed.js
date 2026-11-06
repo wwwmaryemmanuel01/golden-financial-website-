@@ -7,10 +7,11 @@ import { hashPassword, encrypt } from './security.js';
 import { applyRepayment, recomputeLoan, accrueInterest, settlementQuote, postLedger } from './finance.js';
 import { UPLOAD_DIR, DEMO_MODE } from './config.js';
 import GFS from '../shared/core.mjs';
+import CONTENT from '../shared/content.mjs';
 const DEMO = { email: 'demo@goldenfinancial.mw', password: 'Demo@1234', phone: '+265999123456' };
 const past = days => new Date(Date.now() - days * 86400000);
 export function seedSettings() {
-  for (const [k, v] of Object.entries({ company: GFS.COMPANY, products: GFS.PRODUCTS, payment_methods: GFS.PAYMENT_METHODS, branches: GFS.BRANCHES, rules: GFS.RULES, theme: { gold: '#C9A227', emerald: '#0E9F6E', emeraldDeep: '#064E3B' }, config_version: 1 })) if (!getSetting(k)) setSetting(k, v);
+  for (const [k, v] of Object.entries({ company: GFS.COMPANY, products: GFS.PRODUCTS, payment_methods: GFS.PAYMENT_METHODS, branches: GFS.BRANCHES, rules: GFS.RULES, theme: { gold: '#C9A227', emerald: '#0E9F6E', emeraldDeep: '#064E3B', header: '#0F1115', headerSurface: '#171A21', headerBorder: '#23262E', headerGold: '#E4C264' }, blog_posts: CONTENT.BLOG_POSTS, config_version: 1 })) if (!getSetting(k)) setSetting(k, v);
 }
 function sampleDoc(cid, kind, filename) {
   const ref = GFS.refs.document(), content = Buffer.from(`%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n% Sample ${kind}: ${filename}. SANDBOX ONLY.\n%%EOF\n`);
@@ -65,7 +66,7 @@ export function seedDemo() {
   run(`INSERT INTO ticket_messages(ticket_id,sender,sender_name,body) VALUES(?,?,?,?)`, ticket, 'customer', 'Mary Emmanuel', 'Can I split an instalment into two payments?');
   run(`INSERT INTO ticket_messages(ticket_id,sender,sender_name,body) VALUES(?,?,?,?)`, ticket, 'bot', 'Automated acknowledgement', 'This sample ticket is queued for review. Partial payments are supported; only verified payments change the balance.');
   run(`INSERT INTO chat_messages(customer_id,sender,body) VALUES(?,?,?)`, cid, 'bot', 'Hello Mary. I’m the automated Golden assistant. Ask about your sample balance, products, rates or repayments. Choose Human support to open a tracked ticket.');
-  for (const [title, body, category, pinned] of [['Explore the new customer portal', 'This demonstration includes applications, encrypted documents, repayment schedules, statements and support. Sandbox actions do not move real money.', 'service', 1], ['Your security comes first', 'Never share your password, OTP or mobile-money PIN. Report suspicious requests through the Support page.', 'security', 1], ['Plan before you borrow', 'Compare all ten products and use the calculator and eligibility check. Offers remain subject to identity, affordability and credit review.', 'education', 0]]) run(`INSERT INTO announcements(title,body,category,pinned) VALUES(?,?,?,?)`, title, body, category, pinned);
+  for (const [title, body, category, pinned] of [['Explore the new customer portal', 'This demonstration includes applications, encrypted documents, repayment schedules, statements and support. Sandbox actions do not move real money.', 'service', 1], ['Your security comes first', 'Never share your password, OTP or mobile-money PIN. Report suspicious requests through the Support page.', 'security', 1], ['Plan before you borrow', 'Compare the five loan categories and use the calculator and eligibility check. Offers remain subject to identity, affordability and credit review.', 'education', 0]]) run(`INSERT INTO announcements(title,body,category,pinned) VALUES(?,?,?,?)`, title, body, category, pinned);
   audit('sandbox', null, 'system.seeded', 'system', null, null, { demoCustomer: customerNo }, null, null);
   console.log(`[seed] SANDBOX customer: ${DEMO.email} / ${DEMO.password} (${customerNo})`);
   return { email: DEMO.email, password: DEMO.password, customerNo };

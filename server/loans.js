@@ -26,7 +26,9 @@ function assessmentFor(app, u, product) {
 }
 export async function calculator(ctx) {
   const b = { ...Object.fromEntries(ctx.url.searchParams), ...ctx.body };
-  const p = catalog.product(b.productId || b.product) || catalog.products()[0];
+  const requestedProduct = b.productId || b.product;
+  const p = requestedProduct ? catalog.product(requestedProduct) : catalog.products()[0];
+  if (!p) throw new HttpError(400, 'This loan category is not available. Choose one of the five published products.');
   const amount = cleanNum(b.amount, p.min), term = Number(b.term || b.termMonths || p.terms[0]);
   const freq = b.freq || p.freqs[0];
   if (amount < p.min || amount > p.max || !p.terms.includes(term) || !p.freqs.includes(freq)) throw new HttpError(400, 'Choose an amount, term and frequency within this product’s published limits.');
@@ -54,6 +56,7 @@ export function runPipeline(appId, { source = 'sandbox' } = {}) {
     const app = q1(`SELECT * FROM applications WHERE id=?`, appId);
     if (!app || !['submitted', 'pending_documents', 'under_review'].includes(app.status)) throw new HttpError(409, 'This application is not awaiting review.');
     const u = q1(`SELECT * FROM customers WHERE id=?`, app.customer_id), p = catalog.product(app.product_id);
+    if (!p) throw new HttpError(409, 'This product has been retired. Contact support; the historical application is retained.');
     const docs = q(`SELECT * FROM documents WHERE customer_id=? AND (application_id=? OR application_id IS NULL)`, u.id, app.id);
     if (source === 'sandbox' && DEMO_MODE) {
       // Explicitly simulated review: never used in backend/production mode.
@@ -67,7 +70,7 @@ export function runPipeline(appId, { source = 'sandbox' } = {}) {
     if (!u.phone_verified) missing.push('phone verification');
     if (!u.email_verified) missing.push('email verification');
     if (!docs.some(d => ['national_id', 'passport', 'driving_licence'].includes(d.kind))) missing.push('identity document');
-    if (p.id !== 'GL' && !docs.some(d => ['payslip', 'bank_statement', 'business_statement'].includes(d.kind))) missing.push('proof of income');
+    if (!docs.some(d => ['payslip', 'bank_statement', 'business_statement'].includes(d.kind))) missing.push('proof of income');
     if (u.kyc_status !== 'verified') missing.push('independent identity verification');
     const assessment = assessmentFor(app, u, p);
     run(`UPDATE applications SET assessment=?,review_source=? WHERE id=?`, JSON.stringify(assessment), source, app.id);
@@ -94,6 +97,7 @@ export function decideApplication(appId, { approved, reason, source = 'system', 
     const app = q1(`SELECT * FROM applications WHERE id=?`, appId);
     if (!app || !['submitted', 'pending_documents', 'under_review'].includes(app.status)) throw new HttpError(409, 'A decision has already been recorded or the application was cancelled.');
     const u = q1(`SELECT * FROM customers WHERE id=?`, app.customer_id), p = catalog.product(app.product_id);
+    if (approved && !p) throw new HttpError(409, 'Retired products cannot receive new approvals.');
     const reasonText = clean(reason, 2000);
     if (!reasonText) throw new HttpError(400, 'A decision reason is required.');
     if (approved) {
@@ -153,8 +157,8 @@ export async function submitApplication(ctx) {
 }
 export function serializeApp(a) {
   if (!a) return null;
-  const p = catalog.product(a.product_id);
-  return { id: a.id, ref: a.ref, productId: a.product_id, productName: p?.name || a.product_id, amount: a.amount, termMonths: a.term_months, freq: a.freq, purpose: a.purpose,
+  const p = catalog.recordProduct(a.product_id);
+  return { id: a.id, ref: a.ref, productId: a.product_id, productName: p?.label || p?.name || a.product_id, amount: a.amount, termMonths: a.term_months, freq: a.freq, purpose: a.purpose,
     status: a.status, stage: a.stage, decisionReason: a.decision_reason, assessment: json(a.assessment), offer: json(a.offer, null), income: a.income, expenses: a.expenses,
     agreementAcceptedAt: a.agreement_accepted_at, agreementSignature: !!a.agreement_signature, reviewSource: a.review_source, environment: json(a.offer, {}).environment || a.review_source || 'system',
     disbursementMethod: a.disbursement_method, disbursementAccount: a.disbursement_account, timeline: json(a.timeline, []), createdAt: a.created_at, updatedAt: a.updated_at,
@@ -176,6 +180,7 @@ export async function cancelApplication(ctx) {
 export async function acceptAgreement(ctx) {
   const { u, a } = ownApp(ctx), b = ctx.body;
   if (a.status !== 'approved') throw new HttpError(409, 'Only a current approved offer can be accepted.');
+  if (!catalog.product(a.product_id)) throw new HttpError(409, 'This product has been retired. Contact support before taking any further action.');
   const offer = json(a.offer, null);
   if (!offer || offer.validUntil < dateOnly()) throw new HttpError(409, 'This offer has expired. Request a new assessment.');
   if (Number(b.offerVersion) !== offer.version) throw new HttpError(409, 'The offer changed. Review the latest terms.');
@@ -206,6 +211,7 @@ export function createDisbursement(appId, { source = 'system', providerRef }) {
     if (!a || a.status !== 'agreement_accepted' || !a.agreement_accepted_at) throw new HttpError(409, 'A signed, current offer is required before disbursement.');
     if (source === 'sandbox' && !DEMO_MODE) throw new HttpError(403, 'Sandbox disbursement is disabled.');
     const o = json(a.offer), p = catalog.product(a.product_id);
+    if (!p) throw new HttpError(409, 'This product has been retired. The record is retained, but no new disbursement can be made.');
     const start = new Date(), sched = GFS.amortize({ amount: o.amount, monthlyPct: o.rate, termMonths: o.termMonths, freq: o.freq, feePct: o.feePct, startDate: start });
     const ref = GFS.refs.loan(nextSeq('loan'));
     const id = Number(run(`INSERT INTO loans(ref,customer_id,application_id,product_id,principal,rate_monthly,fee_pct,fee_amount,term_months,freq,installment,status,disbursed_at,disbursement_ref,disbursement_method,net_disbursed,outstanding_principal,future_interest,fees_outstanding,next_due_date,next_due_amount,interest_accrued_through,environment) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?,?,?,?,?,?,?,?,?,?)`,
@@ -228,8 +234,8 @@ export function createDisbursement(appId, { source = 'system', providerRef }) {
 export function serializeLoan(l) {
   if (!l) return null;
   const rows = q(`SELECT * FROM schedule WHERE loan_id=? ORDER BY no`, l.id);
-  const p = catalog.product(l.product_id);
-  return { id: l.id, ref: l.ref, productId: l.product_id, productName: p?.name || l.product_id, principal: l.principal, rate: l.rate_monthly, feePct: l.fee_pct, fee: l.fee_amount,
+  const p = catalog.recordProduct(l.product_id);
+  return { id: l.id, ref: l.ref, productId: l.product_id, productName: p?.label || p?.name || l.product_id, principal: l.principal, rate: l.rate_monthly, feePct: l.fee_pct, fee: l.fee_amount,
     termMonths: l.term_months, freq: l.freq, installment: l.installment, status: l.status, disbursedAt: l.disbursed_at, closedAt: l.closed_at, disbursementRef: l.disbursement_ref,
     disbursementMethod: l.disbursement_method, netDisbursed: l.net_disbursed, outstandingPrincipal: l.outstanding_principal, accruedInterest: l.accrued_interest,
     futureInterest: l.future_interest, feesOutstanding: l.fees_outstanding, penalties: l.penalties, creditBalance: l.credit_balance, totalRepaid: l.total_repaid,

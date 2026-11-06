@@ -1,7 +1,7 @@
 {
   "name": "golden-financial-website",
-  "version": "2.0.0",
-  "description": "Golden Financial Services — public website, customer portal and secure backend (MWK). Sandbox and configured-backend modes; linked to golden-loan-services.",
+  "version": "2.1.0",
+  "description": "Golden Financial Services \u2014 five loan categories, customer portal, interactive journal and secure backend (MWK). Sandbox and configured-backend modes; signed admin connector.",
   "type": "module",
   "main": "server/index.js",
   "scripts": {
@@ -11,7 +11,8 @@
     "backup": "node server/backup.js",
     "test": "node tests/run.js",
     "test:browser": "node tests/browser-smoke.cjs",
-    "test:pages": "node tests/pages-entrypoint.js"
+    "test:pages": "node tests/pages-entrypoint.js",
+    "test:catalog": "node tests/catalog-migration.js"
   },
   "engines": {
     "node": ">=22.5.0"

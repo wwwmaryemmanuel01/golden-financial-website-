@@ -12,8 +12,10 @@ payments update balances through an append-only ledger, every financial movement
 has a unique reference, and actions are audited. **Customers can never change
 system settings.**
 
-Theme follows the company logo: **gold `#C9A227`, emerald `#0E9F6E`, deep emerald
-`#064E3B`**.
+The public site offers exactly five loan categories: **Personal, Business, Salary
+Advance, Agriculture and Emergency**. The header matches the dark admin theme:
+**charcoal `#0F1115`, panels `#171A21` / `#1B1F27`, gold `#C9A227` / `#E8C860`**.
+Brand emerald remains in supporting calls to action.
 
 ---
 
@@ -35,9 +37,10 @@ settings and a sandbox demo customer, and starts reminder/outbox/backup jobs.
 **Sandbox sign-in:** `demo@goldenfinancial.mw` / `Demo@1234`
 
 ```bash
-npm test                  # 52-assertion backend end-to-end test (mutates target DB)
-npm run test:browser      # jsdom smoke: 23 public + 21 portal routes, server + static modes
-npm run test:pages        # verify the GitHub Pages entrypoint and packaged assets
+npm test                  # 57-assertion backend end-to-end test (mutates target DB)
+npm run test:browser      # jsdom smoke: 37 public + 21 portal routes, server + static modes
+npm run test:pages        # 11 GitHub Pages packaging/content checks
+npm run test:catalog      # 13 non-destructive catalogue migration checks
 npm run backup            # encrypted SQLite + document backup with SHA-256 manifest
 npm run seed              # add the demo customer if missing
 ```
@@ -83,6 +86,26 @@ GitHub Pages can briefly cache the previous homepage.
 The frontend detects the backend via `GET /api/health`. Static Pages mode is only
 entered on `*.github.io`, `file:`, or an explicit `data-static-demo` flag.
 
+### Loan catalogue and historical records
+
+New applications and public discovery use only `PL`, `BL`, `SA`, `AL` and `EL`.
+Retired definitions are kept internally so old loans/applications/statements remain
+readable. The migration normalises persisted settings without deleting financial
+records; pending retired-product applications are held for support rather than
+automatically approved or disbursed. Unknown/retired calculator product IDs are
+rejected instead of silently falling back to Personal.
+
+### Journal and resource pages
+
+`/blog` and `/blog/:slug` provide an interactive educational journal: search,
+topic filters, device-local bookmarks, share/print, text size, reading progress,
+contents navigation and previous/next articles. The backend can publish validated
+`blog_posts` through the signed connector and labels responses as published; the
+static sandbox labels its bundled library as device-local. It is not a fabricated
+news wire. `/guides`, `/security-centre`, `/borrowing-checklist`, `/complaints`
+and `/accessibility` add practical tools. Motion can be set to Full, Gentle or Off
+and respects reduced-motion preferences.
+
 ### External services are not assumed live
 
 - **TNM Mpamba / Airtel Money:** production mobile payments require a configured
@@ -121,8 +144,12 @@ public/                  Static frontend (no build step) — GitHub Pages compat
   index.html             SPA shell
   css/theme.css          Base design tokens/components
   css/rebuild.css        Rebuilt responsive interface layer
-  js/core.js             Shared financial engine (products, amortisation, eligibility,
-                           allocation, references) used by browser and backend
+  css/experience.css     Dark admin-matching header + journal/resource styles
+  js/core.js             Shared financial engine (five products, archived lookups,
+                           amortisation, eligibility, allocation, references)
+  js/content.js          Structured educational article/checklist defaults
+  js/blog.js             Journal list/detail, bookmarks, reader and motion controls
+  js/resources.js        Guides, security centre, checklist, complaints, accessibility
   js/app.js              Hash router, shells, search, idle logout
   js/api.js              Transport with explicit server/local/unavailable boundary
   js/local.js            Device-local sandbox adapter (no admin bridge)
@@ -137,7 +164,9 @@ server/                  Zero-runtime-dependency Node backend
   config.js              Environment, data dirs, server key, demo/production mode
   db.js                  Central SQLite schema, WAL, audit helpers, immutable triggers
   migrations.js          Idempotent schema migrations
-  catalog.js             Settings-backed products/rules/methods (customer read-only)
+  catalog.js             Settings-backed five-product catalogue, rules, methods,
+                           validated blog publication (customer read-only)
+  content.js             Public read-only blog list/detail API
   finance.js             Accrual, penalties, settlement quotes, repayment allocation
   auth.js                scrypt, sessions, OTP challenges, 2FA, lockout, profile
   loans.js               Applications, simulated/manual review, agreements,
@@ -153,8 +182,11 @@ server/                  Zero-runtime-dependency Node backend
   backup.js              SQLite backup API + encrypted docs + manifest
   seed.js                Sandbox demo data
 shared/core.mjs          Backend loader for the shared financial engine
+shared/content.mjs       Backend loader for the editorial library
 tests/run.js             Backend end-to-end assertions (isolated DB recommended)
-tests/browser-smoke.cjs  jsdom route smoke for server + static sandbox modes
+tests/browser-smoke.cjs  jsdom route/interaction smoke for server + static modes
+tests/catalog-migration.js  Isolated catalogue migration preservation checks
+tests/pages-entrypoint.js   GitHub Pages packaging and content checks
 docs/                    API / integration / security notes
 integration/             Example connector configuration
 ```

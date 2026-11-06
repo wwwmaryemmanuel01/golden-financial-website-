@@ -15,28 +15,32 @@
   const CURRENCY = 'MWK';
   const DAY = 86400000;
 
-  /* ---------------- loan products (mirrors admin PRODUCTS) ---------------- */
+  /* Five published loan categories. Retired definitions are internal only:
+     they keep historical records readable but are never offered to customers. */
+  const CATALOG_VERSION = '2026-11-06-five-products';
   const PRODUCTS = [
-    { id: 'PL', name: 'Personal Loans',        min: 50000,   max: 1000000,   rate: 3.0, fee: 2.0, terms: [1, 3, 6, 12],            freqs: ['monthly', 'fortnightly'],            collateral: false, guarantors: 1, colour: '#C9A227',
+    { id: 'PL', name: 'Personal', label: 'Personal Loan',        min: 50000,   max: 1000000,   rate: 3.0, fee: 2.0, terms: [1, 3, 6, 12],            freqs: ['monthly', 'fortnightly'],            collateral: false, guarantors: 1, colour: '#C9A227',
       tagline: 'Flexible cash for life’s plans', blurb: 'Unsecured personal financing for school fees, home improvements, weddings, travel and everyday goals. Fast decisions, clear terms.',
       uses: ['School fees', 'Home improvements', 'Weddings & events', 'Debt consolidation', 'Travel'],
       eligibility: ['Malawian citizen or resident aged 18+', 'National ID, passport or driving licence', 'Proof of income (payslip or bank statement)', 'One guarantor with a valid ID', 'Active mobile money number'] },
-    { id: 'BL', name: 'Business Loans',        min: 100000,  max: 10000000,  rate: 3.5, fee: 2.5, terms: [6, 9, 12, 18, 24, 36],   freqs: ['monthly', 'fortnightly', 'weekly'],  collateral: true,  guarantors: 1, colour: '#0E9F6E',
+    { id: 'BL', name: 'Business', label: 'Business Loan',        min: 100000,  max: 10000000,  rate: 3.5, fee: 2.5, terms: [6, 9, 12, 18, 24, 36],   freqs: ['monthly', 'fortnightly', 'weekly'],  collateral: true,  guarantors: 1, colour: '#0E9F6E',
       tagline: 'Grow your business with confidence', blurb: 'Working capital and expansion finance for SMEs, traders and enterprises. Stock, equipment, premises and cash-flow support.',
       uses: ['Working capital', 'Stock purchase', 'Equipment', 'Business expansion', 'Premises'],
       eligibility: ['Registered business or verifiable trading activity', '6+ months of trading history', 'Business bank or mobile money statements', 'Collateral for amounts above MK 2,000,000', 'One guarantor'] },
-    { id: 'EL', name: 'Emergency Loans',       min: 20000,   max: 500000,    rate: 4.0, fee: 2.0, terms: [1, 2, 3],                freqs: ['monthly', 'weekly', 'daily'],        collateral: false, guarantors: 1, colour: '#D97706',
-      tagline: 'Help when you need it most', blurb: 'Same-day short-term credit for urgent, unexpected needs — funerals, urgent travel, emergency repairs.',
-      uses: ['Funeral expenses', 'Urgent travel', 'Emergency repairs', 'Unexpected bills'],
-      eligibility: ['Valid national ID', 'Verifiable income or repayment source', 'Active mobile money number', 'One guarantor'] },
-    { id: 'SA', name: 'Salary Advance Loans',  min: 50000,   max: 800000,    rate: 2.5, fee: 1.5, terms: [1, 3, 6],                freqs: ['monthly'],                           collateral: false, guarantors: 0, colour: '#2F6FED',
+    { id: 'SA', name: 'Salary Advance', label: 'Salary Advance',  min: 50000,   max: 800000,    rate: 2.5, fee: 1.5, terms: [1, 3, 6],                freqs: ['monthly'],                           collateral: false, guarantors: 0, colour: '#2F6FED',
       tagline: 'Bridge the gap to payday', blurb: 'Advance against your next salary for confirmed employees. Repayments align with your pay date.',
       uses: ['Mid-month cash flow', 'School fees', 'Medical bills', 'Family commitments'],
       eligibility: ['Confirmed employee (3+ months in post)', 'Latest payslip', 'Employer confirmation letter', 'Salary paid through a bank or mobile money'] },
-    { id: 'AL', name: 'Agricultural Loans',    min: 40000,   max: 1500000,   rate: 3.0, fee: 2.0, terms: [3, 6, 9, 12],            freqs: ['monthly'],                           collateral: false, guarantors: 1, colour: '#7C5CF0',
+    { id: 'AL', name: 'Agriculture', label: 'Agriculture Loan',    min: 40000,   max: 1500000,   rate: 3.0, fee: 2.0, terms: [3, 6, 9, 12],            freqs: ['monthly'],                           collateral: false, guarantors: 1, colour: '#7C5CF0',
       tagline: 'Finance the season, harvest the return', blurb: 'Input and equipment finance for farmers and agri-businesses, with repayment plans shaped around the harvest.',
       uses: ['Seed & fertiliser', 'Irrigation', 'Farm equipment', 'Livestock', 'Post-harvest storage'],
       eligibility: ['Verifiable farming activity or land access', 'Season plan and budget', 'Group or extension-worker reference', 'One guarantor'] },
+    { id: 'EL', name: 'Emergency', label: 'Emergency Loan',       min: 20000,   max: 500000,    rate: 4.0, fee: 2.0, terms: [1, 2, 3],                freqs: ['monthly', 'weekly', 'daily'],        collateral: false, guarantors: 1, colour: '#D97706',
+      tagline: 'Help when you need it most', blurb: 'Same-day short-term credit for urgent, unexpected needs — funerals, urgent travel, emergency repairs.',
+      uses: ['Funeral expenses', 'Urgent travel', 'Emergency repairs', 'Unexpected bills'],
+      eligibility: ['Valid national ID', 'Verifiable income or repayment source', 'Active mobile money number', 'One guarantor'] },
+  ];
+  const ARCHIVED_PRODUCTS = [
     { id: 'ED', name: 'Education Loans',       min: 50000,   max: 3000000,   rate: 2.0, fee: 1.5, terms: [6, 12, 18, 24],          freqs: ['monthly'],                           collateral: false, guarantors: 1, colour: '#0891B2',
       tagline: 'Invest in learning', blurb: 'Tuition and study finance for students, parents and professionals — school fees, university, college and certification.',
       uses: ['School & university fees', 'Boarding', 'Books & equipment', 'Professional courses'],
@@ -58,8 +62,8 @@
       uses: ['Home purchase', 'Construction', 'Renovation', 'Land purchase with title'],
       eligibility: ['Titled property or registered sale agreement', 'Professional valuation', '30% deposit or equity', 'Verifiable stable income', 'Property insurance'] }
   ];
-  const productById = id => PRODUCTS.find(p => p.id === id) || null;
-  const productByName = n => PRODUCTS.find(p => p.name === n) || null;
+  const productById = (id, includeArchived = false) => PRODUCTS.find(p => p.id === id) || (includeArchived ? ARCHIVED_PRODUCTS.find(p => p.id === id) : null) || null;
+  const productByName = n => PRODUCTS.find(p => p.name.toLowerCase() === String(n).toLowerCase() || p.label.toLowerCase() === String(n).toLowerCase()) || null;
 
   /* ---------------- system rules (read-only for customers) ---------------- */
   const RULES = {
@@ -299,31 +303,31 @@
   ];
 
   const FAQS = [
-    { q: 'How do I apply for a loan?', a: 'Register on this website, verify your phone and email, complete your profile and KYC, then use Apply for a Loan. You will receive a reference number (GLS-APP-…) and can track every stage in your portal.' },
-    { q: 'How long does approval take?', a: 'Complete applications with verified documents are assessed automatically and most decisions are issued within 24 hours. Manual referrals may take up to 3 working days.' },
-    { q: 'What interest rate will I pay?', a: 'Rates depend on the product: from 1.8% per month (mortgages) to 4.0% (emergency loans), charged on the declining balance. Your exact rate is shown in the calculator and in your offer before you accept.' },
-    { q: 'What fees are charged?', a: 'A one-off arrangement fee of 1.0%–2.5% of the principal (by product) is deducted at disbursement. Late payments attract 2% of the overdue instalment per month after a 3-day grace period. There are no hidden charges.' },
-    { q: 'How do I repay?', a: 'Pay from your portal with TNM Mpamba, Airtel Money, bank transfer or cash at any branch using verified provider details. Every verified payment updates your balance immediately and issues a receipt.' },
-    { q: 'Can I repay early?', a: 'Yes. Request a settlement statement in your portal — you pay only the outstanding principal plus interest accrued to that date. All future interest is waived.' },
-    { q: 'What documents do I need?', a: 'A national ID, passport or driving licence; proof of income (payslip or statements); and product-specific documents such as a quotation, admission letter or medical report. Upload them securely in your portal.' },
-    { q: 'Do I need a guarantor or collateral?', a: 'Most products need one guarantor. Business loans above MK 2,000,000, asset financing and mortgages require security. Salary advance loans need no guarantor.' },
-    { q: 'Is my information safe?', a: 'Yes. Passwords are hashed, documents are encrypted at rest, sessions expire automatically, and you can only ever see your own records. Every action is written to an audit trail.' },
-    { q: 'What happens if I miss a payment?', a: 'After a 3-day grace period a 2% late penalty applies to the overdue instalment. You will receive reminders by SMS and in the portal. Contact us early — we can discuss restructuring.' },
-    { q: 'Can I borrow again while I have a loan?', a: 'Yes, up to 2 active loans and a total exposure of MK 20,000,000, subject to affordability. You can also request a top-up, renewal or refinancing from your portal.' },
-    { q: 'How is this website linked to the Golden Loan Services system?', a: 'This website and customer portal share the company’s central loan records with the Golden Loan Services back-office system. Applications, payments and statements stay in sync, and system settings (rates, fees, products) are managed there — never by customers.' }
+    { q: 'Which loan products are available?', a: 'Five categories are available: Personal, Business, Salary Advance, Agriculture and Emergency. Compare their published limits, rates, fees and requirements before applying.' },
+    { q: 'How do I apply for a loan?', a: 'Register, verify your phone and email, complete your profile, upload the required documents and submit an application. Your portal shows the reference, review stage and decision reason.' },
+    { q: 'How long does approval take?', a: 'Review time depends on document completeness, identity checks and affordability assessment. The portal shows the current status; the website does not promise an approval deadline. Sandbox decisions are simulations only.' },
+    { q: 'What interest rate will I pay?', a: 'Each product has a published monthly declining-balance rate. Actual interest accrues daily on unpaid principal. Your current offer and signed agreement state the applicable terms.' },
+    { q: 'What fees are charged?', a: 'The published arrangement fee is deducted at disbursement. Late charges and grace periods follow the published rules. Review the calculator, offer and agreement before accepting.' },
+    { q: 'How do I repay?', a: 'Create a payment reference in your portal and use the available mobile-money, bank-transfer or branch-cash instructions. Live balances change only after provider verification or authorised reconciliation.' },
+    { q: 'Can I repay early?', a: 'Yes. Request today’s settlement quote. It includes outstanding principal, accrued interest, fees and penalties; future unaccrued interest is waived.' },
+    { q: 'What documents do I need?', a: 'Prepare valid identity evidence, proof of income or repayment source, and product-specific evidence such as trading records, a season plan, employment confirmation or an urgent invoice.' },
+    { q: 'Do I need a guarantor or collateral?', a: 'The standard Personal, Business, Agriculture and Emergency products require one guarantor. Salary Advance does not. Larger Business Loans may require valued collateral. Guarantor consent and identity still need review.' },
+    { q: 'Is my information safe?', a: 'The secure backend hashes passwords, encrypts documents, restricts access to your own records and audits financial actions. GitHub Pages sandbox storage is device-local; do not enter real sensitive information there.' },
+    { q: 'What happens if I miss a payment?', a: 'Published late charges may apply after the grace period. Contact support early to request a restructuring review. A request does not change your contract until an authorised decision is recorded.' },
+    { q: 'How is the admin system linked?', a: 'The customer backend exposes a signed connector for the separate Golden Loan Services system. Synchronisation requires a deployed, configured adapter. The public admin prototype and GitHub Pages sandbox are not a live shared database.' }
   ];
 
   const TESTIMONIALS = [
-    { name: 'Chisomo K.', place: 'Blantyre', product: 'Business Loan', text: 'The MK 1,200,000 business loan restocked my shop before the festive season. I applied on my phone on Tuesday and the money was in my Airtel Money by Thursday.', rating: 5 },
-    { name: 'Memory P.', place: 'Lilongwe', product: 'Salary Advance', text: 'School fees were due before payday. The salary advance was approved the same morning and the repayment matched my pay date exactly.', rating: 5 },
-    { name: 'Tadala M.', place: 'Mangochi', product: 'Agricultural Loan', text: 'They understood the farming season. My fertiliser loan repayment starts after harvest — that is why I came back for a second season.', rating: 5 },
-    { name: 'Agnes C.', place: 'Zomba', product: 'Group Loan', text: 'Our village bank of twelve women borrowed together. The portal shows each of us our balance and receipts — no arguments, no confusion.', rating: 5 },
-    { name: 'Kondwani M.', place: 'Mzuzu', product: 'Asset Financing', text: 'I financed my minibus through GFS. The instalments were clear from the calculator, and I got the logbook released the week I finished paying.', rating: 4 },
-    { name: 'Thoko N.', place: 'Lilongwe', product: 'Medical Loan', text: 'When my mother needed surgery, the medical loan was paid straight to the hospital. I will never forget how fast they moved.', rating: 5 }
+    { name: 'Chisomo K.', place: 'Blantyre', product: 'Business', text: 'Illustrative story: a trader compares working-capital terms, prepares stock records and follows the application from one portal.', rating: 5 },
+    { name: 'Memory P.', place: 'Lilongwe', product: 'Salary Advance', text: 'Illustrative story: an employee checks the repayment against payday before deciding whether a short-term advance fits the budget.', rating: 5 },
+    { name: 'Tadala M.', place: 'Mangochi', product: 'Agriculture', text: 'Illustrative story: a farmer maps input costs and expected harvest income, then reviews the published repayment schedule.', rating: 5 },
+    { name: 'Agnes C.', place: 'Zomba', product: 'Personal', text: 'Illustrative story: a household compares the total repayable amount and keeps receipts and statements together.', rating: 5 },
+    { name: 'Kondwani M.', place: 'Mzuzu', product: 'Business', text: 'Illustrative story: a small-business owner checks affordability before requesting funds for equipment.', rating: 4 },
+    { name: 'Thoko N.', place: 'Lilongwe', product: 'Emergency', text: 'Illustrative story: a borrower reviews an urgent expense, checks the short term and keeps a unique payment reference.', rating: 5 }
   ];
 
   return {
-    CURRENCY, RULES, PRODUCTS, PAYMENT_METHODS, BRANCHES, COMPANY, AGREEMENT_CLAUSES, FAQS, TESTIMONIALS,
+    CURRENCY, CATALOG_VERSION, RULES, PRODUCTS, ARCHIVED_PRODUCTS, PAYMENT_METHODS, BRANCHES, COMPANY, AGREEMENT_CLAUSES, FAQS, TESTIMONIALS,
     productById, productByName, periodRate, periodsFor, instalmentFor, amortize, assess, allocate, settlementQuote,
     round2, mk, mk2, num, iso, addMonths, addDays, daysBetween, fmtDate, fmtDateTime, refs,
     isEmail, isPhoneMW, normPhone, passwordIssues

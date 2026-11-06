@@ -62,7 +62,7 @@
   App.route('/portal/loans/:id', {
     title: 'Loan Details', layout: 'portal', auth: true, render: async ({ id }) => {
       const d = await API.get('/api/loans/' + id);
-      const l = d.loan;
+      const l = d.loan, settlement = d.settlement || l.settlement || null, transactions = l.transactions || d.transactions || [];
       const overdue = l.nextDueDate && l.nextDueDate < GFS.iso(new Date()) && l.status === 'active';
       return portalHead(`${UI.productIcon(l.productId)} ${esc(l.productName)}`, `<span class="mono">${esc(l.ref)}</span> · disbursed ${GFS.fmtDate(l.disbursedAt)}`,
         `<a href="#/portal/loans" class="btn btn-ghost btn-sm">← All loans</a>`) + `
@@ -75,11 +75,11 @@
         <div class="kpi"><div class="k-label">Progress</div><div class="k-value">${l.progress}%</div><div class="k-sub">${l.installmentsPaid}/${l.installmentsTotal} instalments</div></div>
       </div>
       ${l.status === 'active' ? `<div class="card card-accent mt-2"><div class="flex-between wrap"><div><h3 class="mb-0">💳 Repay this loan</h3><div class="muted small">Mpamba · Airtel Money · Bank · Cash — balance updates instantly on verification</div></div>
-        <div class="flex wrap"><button class="btn btn-gold" id="pay-btn">Make a payment</button><button class="btn btn-emerald" id="settle-btn">Settle in full (${GFS.mk(l.settlement.total)})</button></div></div>
-        <div class="tiny muted mt-1">Early settlement waives ${GFS.mk(l.settlement.futureInterestWaived)} of future interest. <a href="#" id="settlement-pdf">Download settlement statement</a></div></div>` : `<div class="alert alert-success mt-2">🎉 This loan is fully settled. ${l.closedAt ? 'Closed ' + GFS.fmtDate(l.closedAt) + '.' : ''} Security released.</div>`}
+        <div class="flex wrap"><button class="btn btn-gold" id="pay-btn">Make a payment</button><button class="btn btn-emerald" id="settle-btn">Settle in full (${GFS.mk(settlement?.total || 0)})</button></div></div>
+        <div class="tiny muted mt-1">Early settlement waives ${GFS.mk(settlement?.futureInterestWaived || 0)} of future interest. <a href="#" id="settlement-pdf">Download settlement statement</a></div></div>` : `<div class="alert alert-success mt-2">🎉 This loan is fully settled. ${l.closedAt ? 'Closed ' + GFS.fmtDate(l.closedAt) + '.' : ''} Security released.</div>`}
       <div class="grid grid-2 mt-2" style="align-items:start">
         <div class="card"><h3>📋 Loan terms</h3>
-          ${UI.table(['Item', 'Detail'], [['Principal', GFS.mk(l.principal)], ['Interest rate', (l.rateMonthly ?? l.rate ?? 0) + '% per month (declining)'], ['Arrangement fee', `${l.feePct}% (${GFS.mk(l.feeAmount)})`], ['Net disbursed', GFS.mk(l.netDisbursed)], ['Term', `${l.termMonths} months · ${l.freq}`], ['Instalment', GFS.mk(l.installment)], ['Disbursement ref', `<span class="mono tiny">${esc(l.disbursementRef || '—')}</span>`], ['Disbursement method', esc(l.disbursementMethod || '—')], ['Status', UI.badge(l.status)]], { numCols: [] })}
+          ${UI.table(['Item', 'Detail'], [['Principal', GFS.mk(l.principal)], ['Interest rate', (l.rateMonthly ?? l.rate ?? 0) + '% per month (declining)'], ['Arrangement fee', `${l.feePct}% (${GFS.mk(l.feeAmount ?? l.fee ?? 0)})`], ['Net disbursed', GFS.mk(l.netDisbursed)], ['Term', `${l.termMonths} months · ${l.freq}`], ['Instalment', GFS.mk(l.installment)], ['Disbursement ref', `<span class="mono tiny">${esc(l.disbursementRef || '—')}</span>`], ['Disbursement method', esc(l.disbursementMethod || '—')], ['Status', UI.badge(l.status)]], { numCols: [] })}
           <div class="flex wrap mt-2">
             <button class="btn btn-ghost btn-sm" id="stmt-pdf">📑 Loan statement PDF</button>
             <button class="btn btn-ghost btn-sm" id="disb-pdf">💰 Disbursement receipt</button>
@@ -87,7 +87,7 @@
           </div>
         </div>
         <div class="card"><h3>🕘 Loan transactions</h3>
-          ${d.transactions.length ? UI.table(['Date', 'Type', 'Amount', 'Status'], d.transactions.slice(0, 10).map(t => [GFS.fmtDate(t.createdAt), esc(t.type), GFS.mk(t.amount), UI.badge(t.status)]), { numCols: [2] }) : '<p class="muted small">No transactions.</p>'}
+          ${transactions.length ? UI.table(['Date', 'Type', 'Amount', 'Status'], transactions.slice(0, 10).map(t => [GFS.fmtDate(t.createdAt), esc(t.type), GFS.mk(t.amount), UI.badge(t.status)]), { numCols: [2] }) : '<p class="muted small">No transactions.</p>'}
           <a href="#/portal/transactions?loanId=${l.id}" class="small">Full history →</a>
         </div>
       </div>
@@ -201,14 +201,15 @@
   /* ---------------- APPLY (guided multi-step) ---------------- */
   App.route('/portal/apply', {
     title: 'Apply for a Loan', layout: 'portal', auth: true, render: async () => {
-      const u = App.user;
-      const pre = App.query().product || 'PL'; const q0 = App.query();
+      const u = App.user, requested = App.query().product;
+      if (requested && !P().some(p => p.id === requested)) return portalHead('Apply for a Loan', 'This loan category is unavailable') + `<div class="alert alert-warn">${UI.icon('alert')}<div>The requested category is not one of the five published products. Historical records remain in your portal.</div></div><a class="btn btn-gold mt-2" href="#/loans">Compare the five products ${UI.icon('arrow')}</a>`;
+      const pre = requested || 'PL';
       return portalHead('Apply for a Loan', 'A guided application — your profile details are pre-filled') + `
       <div class="grid grid-2" style="align-items:start">
         <div class="card card-accent">
           <form id="apply-form">
             <fieldset><legend>1 · Choose your loan</legend>
-              ${UI.field('Loan product', UI.select('productId', P().map(p => [p.id, `${p.name} · ${p.rate}%/mo · ${GFS.mk(p.min)}–${GFS.mk(p.max)}`]), pre))}
+              ${UI.field('Loan product', UI.select('productId', P().map(p => [p.id, `${UI.productLabel(p)} · ${p.rate}%/mo · ${GFS.mk(p.min)}–${GFS.mk(p.max)}`]), pre))}
               <div id="prod-info" class="alert alert-info small"></div>
               <div class="form-grid">
                 ${UI.field('Amount (MWK)', UI.input('amount', 'type="number" required min="10000" step="5000"'))}
@@ -259,7 +260,8 @@
       </div>`;
     },
     mount: async el => {
-      const form = el.querySelector('#apply-form');
+      const form = el.querySelector('#apply-form'); if (!form) return;
+      const q0 = App.query();
       const prodSel = form.elements.productId;
       const syncProduct = () => {
         const p = P().find(x => x.id === prodSel.value);
@@ -267,7 +269,7 @@
         form.elements.freq.innerHTML = p.freqs.map(f => `<option value="${f}">${f[0].toUpperCase() + f.slice(1)}</option>`).join('');
         form.elements.amount.min = p.min; form.elements.amount.max = p.max;
         if (!form.elements.amount.value || Number(form.elements.amount.value) < p.min || Number(form.elements.amount.value) > p.max) form.elements.amount.value = q0.amount && Number(q0.amount) >= p.min && Number(q0.amount) <= p.max ? Number(q0.amount) : Math.round((p.min + Math.min(p.max, p.min * 5)) / 2);
-        el.querySelector('#prod-info').innerHTML = `${UI.productIcon(p.id)} <b>${esc(p.name)}</b>: ${GFS.mk(p.min)}–${GFS.mk(p.max)} · ${p.rate}%/month · ${p.fee}% fee · ${p.guarantors} guarantor(s) · ${p.collateral ? 'collateral may be required' : 'no collateral'}.`;
+        el.querySelector('#prod-info').innerHTML = `${UI.productIcon(p.id)} <b>${esc(UI.productLabel(p))}</b>: ${GFS.mk(p.min)}–${GFS.mk(p.max)} · ${p.rate}%/month · ${p.fee}% fee · ${p.guarantors} guarantor(s) · ${p.collateral ? 'collateral may be required' : 'no collateral'}.`;
         el.querySelector('#collateral-fs').style.display = p.collateral ? '' : 'none';
       };
       async function quote() {

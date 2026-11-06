@@ -39,8 +39,14 @@ jobs:
           test -f public/index.html
           test -f public/js/core.js
           test -f public/css/rebuild.css
+          test -f public/css/experience.css
+          test -f public/js/content.js
+          test -f public/js/blog.js
+          test -f public/js/resources.js
           test -f public/js/portal-extra.js
           grep -q 'css/rebuild.css' public/index.html
+          grep -q 'css/experience.css' public/index.html
+          grep -q 'js/blog.js' public/index.html
           grep -q 'js/portal-extra.js' public/index.html
           touch public/.nojekyll
       - uses: actions/configure-pages@v5
