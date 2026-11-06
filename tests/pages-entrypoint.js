@@ -122,4 +122,30 @@ check('the homepage emblem keeps the dark system colour inside the ring only', (
   assert.ok(opaque > 0, `Missing emblem asset: ${logo}`);
   assert.match(home, /hero-logo-seal"><img src="assets\/logo\.png"/, 'The transparent emblem must sit on the dark ring, not an opaque black plate.');
 });
+check('the live image band is packaged with its photography', () => {
+  const site = read('public/index.html');
+  assert.match(site, /js\/live-feed\.js/, 'The live band module must load on the website.');
+  assert.ok(fs.existsSync(path.join(root, 'public/js/live-feed.js')), 'Missing public/js/live-feed.js');
+  const worker = read('public/sw.js');
+  assert.match(worker, /'\.\/js\/live-feed\.js'/, 'The offline shell must cache the live band module.');
+  const sources = read('public/js/live-feed.js') + read('public/js/public-pages.js');
+  const images = [...sources.matchAll(/assets\/live\/[a-z-]+\.jpg/g)].map(m => m[0]);
+  assert.ok(images.length >= 5, 'The live band needs its illustrative photography.');
+  for (const image of new Set(images)) {
+    const file = path.join(root, 'public', image);
+    assert.ok(fs.existsSync(file), `Missing photography: ${image}`);
+    assert.ok(fs.statSync(file).size > 20000, `Photography looks empty: ${image}`);
+  }
+  const feed = read('public/js/live-feed.js');
+  for (const motion of ['tilt', 'spin', 'swap', 'flap', 'flip', 'rotate', 'breathe', 'twinkle']) assert.ok(feed.includes(`'${motion}'`), `Live band is missing the ${motion} animation`);
+  assert.match(feed, /data-live-pause/, 'Automatic rotation needs a pause control.');
+});
+check('the calculator result sheet lists real payment dates', () => {
+  const pages = read('public/js/public-pages.js');
+  assert.match(pages, /function dateList\(/, 'The result sheet needs a payment-date list.');
+  assert.match(pages, /dl-date/, 'Payment dates need their own column.');
+  assert.match(pages, /'First payment date'/, 'The result sheet needs the first payment date.');
+  assert.match(pages, /'Final due date'/, 'The result sheet needs the final due date.');
+  assert.match(pages, /payments · \$\{firstDue\}/, 'The schedule summary must show the date range, not only a count.');
+});
 console.log(`\n  ${checks} GitHub Pages packaging checks passed.\n`);

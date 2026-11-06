@@ -39,7 +39,7 @@ settings and a sandbox demo customer, and starts reminder/outbox/backup jobs.
 ```bash
 npm test                  # 69-assertion backend end-to-end test (mutates target DB)
 npm run test:browser      # jsdom smoke: 37 public + 23 portal routes, server + static modes
-npm run test:pages        # 13 GitHub Pages packaging/content checks
+npm run test:pages        # 15 GitHub Pages packaging/content checks
 npm run test:catalog      # 13 non-destructive catalogue migration checks
 npm run backup            # encrypted SQLite + document backup with SHA-256 manifest
 npm run seed              # add the demo customer if missing
@@ -126,10 +126,26 @@ and respects reduced-motion preferences.
 - Term and payment frequency are independent: a one-month term paid annually
   produces **one repayment at maturity**, not a twelve-month loan.
 - The result sheet prints the loan product, principal, interest rate, interest
-  amount, processing fee, duration, the full payment schedule **with due dates**
-  and the total repayment. The processing fee is deducted once at disbursement,
+  amount, processing fee, duration, **the payment schedule dates** (a dated list on
+  the sheet, plus first and final payment dates in the breakdown), the full
+  schedule table **with due dates** and the total repayment. The processing fee is deducted once at disbursement,
   so total repayment is principal + interest while the total cost also includes
   the fee. Quotes can be printed and exported.
+
+### Live image band and money guidance
+
+The homepage **Live from Golden** band turns administration notices and journal
+articles into image cards with short messages. It rotates through the published
+pool, re-rolls each card's animation automatically (tilt, slow spin, sheen, flap,
+flip, rotate, breathe, twinkle), pauses on hover/focus and on demand, and stops
+automatically for reduced-motion preferences. Notices stay authoritative: the band
+polls `/api/announcements`, labels the source and links to the admin publishing
+screen. Photography is illustrative and labelled as such. Journal cards on `/blog`
+also pick new animations over time.
+
+A **lending at a glance** strip publishes real catalogue figures — product count,
+borrowing range, monthly rate range, arrangement fee range, term range and branch
+count — computed from the published products, never invented.
 
 ### Live announcement cards
 
